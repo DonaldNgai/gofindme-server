@@ -5,9 +5,8 @@ import swaggerUi from '@fastify/swagger-ui';
 import { registerCors } from './plugins/cors.js';
 import { registerHelmet } from './plugins/helmet.js';
 import { healthRoutes } from './routes/health.js';
-import { registerApiKeyRoutes } from './routes/api-keys.js';
-import { registerGroupRoutes } from './routes/groups.js';
-import { registerLocationRoutes } from './routes/locations.js';
+import { registerInternalRoutes } from './routes/internal/index.js';
+import { registerPublicRoutes } from './routes/public/index.js';
 import { env } from './config/env.js';
 
 export async function buildApp(fastify: FastifyInstance) {
@@ -26,9 +25,10 @@ export async function buildApp(fastify: FastifyInstance) {
     openapi: {
       openapi: '3.0.0',
       info: {
-        title: 'FleetLink Location API',
+        title: 'GoFindMe Location API',
         version: env.API_VERSION ?? '1.0.0',
-        description: 'Receive, store, and relay location updates from mobile clients.',
+        description:
+          'Public API for location tracking. Internal endpoints (tagged with "Internal") require Auth0 authentication and are for admin use only.',
       },
       components: {
         securitySchemes: {
@@ -121,11 +121,15 @@ export async function buildApp(fastify: FastifyInstance) {
     reply.type('application/json').send(spec);
   });
 
-  // Register routes
+  // Register public routes (for npm package / API key users)
+  // These are documented in Swagger and part of the public API
   await fastify.register(healthRoutes, { prefix: env.API_PREFIX });
-  await fastify.register(registerGroupRoutes);
-  await fastify.register(registerApiKeyRoutes);
-  await fastify.register(registerLocationRoutes);
+  await fastify.register(registerPublicRoutes, { prefix: env.API_PREFIX });
+
+  // Register internal routes (for Next.js frontend / Auth0 users)
+  // These require Auth0 authentication and are NOT in the public npm package
+  // Tagged as "Internal" in Swagger but still accessible if you have Auth0 token
+  await fastify.register(registerInternalRoutes, { prefix: env.INTERNAL_API_PREFIX });
 
   // Global error handler
   fastify.setErrorHandler((error: Error & { statusCode?: number }, _request, reply) => {

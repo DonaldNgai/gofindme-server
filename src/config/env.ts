@@ -5,6 +5,7 @@ const envSchema = z.object({
   HOST: z.string().default('0.0.0.0'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   API_PREFIX: z.string().default('/api/v1'),
+  INTERNAL_API_PREFIX: z.string().default('/api/internal'),
   CORS_ORIGIN: z.string().default('http://localhost:3000'),
   RATE_LIMIT_MAX: z.coerce.number().optional(),
   RATE_LIMIT_WINDOW: z.string().optional(),
@@ -14,6 +15,8 @@ const envSchema = z.object({
   AUTH0_DOMAIN: z.string().url().optional(),
   AUTH0_ISSUER_BASE_URL: z.string().url().optional(),
   AUTH0_AUDIENCE: z.string().optional(),
+  AUTH0_M2M_CLIENT_ID: z.string().optional(),
+  AUTH0_M2M_CLIENT_SECRET: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
