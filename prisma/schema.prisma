@@ -1,0 +1,83 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model api_keys {
+  id            String    @id
+  group_id      String
+  user_id       String?
+  label         String
+  hashed_secret String
+  last_used_at  DateTime?
+  created_at    DateTime  @default(now())
+  revoked_at    DateTime?
+  groups        groups    @relation(fields: [group_id], references: [id], onDelete: Cascade)
+  users         users?    @relation(fields: [user_id], references: [id])
+
+  @@index([group_id])
+  @@map("api_keys")
+}
+
+model group_members {
+  id         String   @id @default(cuid())
+  group_id   String
+  user_id    String
+  status     String   @default("pending")
+  created_at DateTime @default(now())
+  groups     groups   @relation(fields: [group_id], references: [id], onDelete: Cascade)
+  users      users    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([group_id, user_id])
+  @@map("group_members")
+}
+
+model groups {
+  id            String          @id @default(cuid())
+  name          String
+  description   String?
+  owner_id      String
+  api_base_url  String?
+  created_at    DateTime        @default(now())
+  updated_at    DateTime        @updatedAt
+  api_keys      api_keys[]
+  group_members group_members[]
+  locations     locations[]
+  @@map("groups")
+}
+
+model locations {
+  id              String   @id @default(cuid())
+  group_id        String
+  device_id       String
+  latitude        Float
+  longitude       Float
+  accuracy        Float?
+  speed           Float?
+  heading         Float?
+  recorded_at     DateTime
+  received_at     DateTime @default(now())
+  payload_version String   @default("v1")
+  metadata        String?
+  groups          groups   @relation(fields: [group_id], references: [id], onDelete: Cascade)
+
+  @@index([device_id])
+  @@index([group_id])
+  @@index([recorded_at])
+  @@map("locations")
+}
+
+model users {
+  id            String          @id @default(cuid())
+  email         String          @unique
+  name          String?
+  created_at    DateTime        @default(now())
+  updated_at    DateTime        @updatedAt
+  api_keys      api_keys[]
+  group_members group_members[]
+  @@map("users")
+}
