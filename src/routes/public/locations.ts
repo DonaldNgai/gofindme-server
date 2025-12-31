@@ -3,7 +3,9 @@ import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import { prisma as db } from '../../db.js';
 import { locationBus } from '../../services/bus.js';
+import { findAuthorizedGroupsForUser } from '../../services/location-auth.js';
 import { requireApiKey } from '../../utils/api-key.js';
+import { requireAuth } from '../../utils/auth.js';
 import { zodToJsonSchemaFastify } from '../../utils/zod-to-json-schema.js';
 
 const locationPayload = z.object({
@@ -32,8 +34,18 @@ type DocumentedSchema = FastifySchema & {
 
 /**
  * Public routes for location tracking
- * These are accessible via API keys (for npm package users)
- * NOT requiring Auth0 authentication
+ * 
+ * Location submission flow:
+ * 1. User submits location with Auth0 access token
+ * 2. Token identifies the user (auth.sub = userId)
+ * 3. Find all groups where user is a member AND have active API keys
+ * 4. Publish location update to all those groups
+ * 5. Only API keys assigned to those groups receive notifications
+ * 
+ * Stream subscription:
+ * - Requires API key authentication (developer apps)
+ * - Apps subscribe to their assigned group's events
+ * - They only receive location updates for users in their group
  */
 export async function registerPublicLocationRoutes(app: FastifyInstance) {
   // Submit location update
@@ -43,20 +55,75 @@ export async function registerPublicLocationRoutes(app: FastifyInstance) {
       schema: {
         tags: ['Locations'],
         summary: 'Submit a device location update',
-        description: 'Public endpoint for submitting location data. Requires API key authentication.',
+        description: 'Endpoint for users to submit their location data. Requires Auth0 authentication.',
         body: zodToJsonSchemaFastify(locationPayload),
         response: { 202: zodToJsonSchemaFastify(ingestionResponse) },
-        security: [{ apiKey: [] }],
+        security: [{ bearerAuth: [] }],
       } as DocumentedSchema,
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      const apiKey = await requireApiKey(request, reply);
+      const auth = await requireAuth(request, reply);
       const body = locationPayload.parse(request.body);
+
+      // Find or create user from Auth0 token
+      let user = await db.users.findFirst({
+        where: {
+          OR: [{ email: auth.email as string }, { id: auth.sub }],
+        },
+      });
+
+      if (!user && auth.email) {
+        user = await db.users.create({
+          data: {
+            id: auth.sub,
+            email: auth.email as string,
+            name: auth.name as string | undefined,
+          },
+        });
+      } else if (user && user.id !== auth.sub) {
+        // Update user ID to match Auth0 sub if different
+        user = await db.users.update({
+          where: { id: user.id },
+          data: { id: auth.sub },
+        });
+      }
+
+      // The Auth0 token identifies the user (auth.sub is the user ID)
+      const userId = user?.id ?? auth.sub;
+      const deviceId = body.deviceId || userId; // Use userId as deviceId if not provided
+
+      // Find all groups where this user is a member AND have active API keys
+      // These are the groups that should be notified of the location update
+      // Only API keys assigned to these groups can receive location updates for this user
+      const authorizedGroups = await findAuthorizedGroupsForUser(userId);
+
+      if (authorizedGroups.length === 0) {
+        reply.code(403);
+        throw new Error('User is not a member of any groups with active API keys. Join a group with an active app before submitting location data.');
+      }
+
+      // Get user's first group for storage (we still need a group_id for the location record)
+      const userGroupMembership = await db.group_members.findFirst({
+        where: {
+          user_id: userId,
+          status: {
+            not: 'pending',
+          },
+        },
+        orderBy: {
+          created_at: 'asc',
+        },
+      });
+
+      if (!userGroupMembership) {
+        reply.code(403);
+        throw new Error('User is not a member of any groups. Join a group before submitting location data.');
+      }
 
       const payload = {
         id: nanoid(16),
-        groupId: apiKey.group_id,
-        deviceId: body.deviceId,
+        groupId: userGroupMembership.group_id, // For storage - location is stored with a group_id
+        deviceId,
         latitude: body.latitude,
         longitude: body.longitude,
         accuracy: body.accuracy ?? null,
@@ -85,8 +152,13 @@ export async function registerPublicLocationRoutes(app: FastifyInstance) {
         },
       });
 
-      locationBus.publishLocation(apiKey.group_id, {
-        deviceId: body.deviceId,
+      // Publish location update to all authorized groups
+      // This notifies all groups where:
+      // 1. The user (identified by Auth0 token) is a member
+      // 2. The group has at least one active API key (developer app)
+      // Only API keys assigned to these groups can receive the location update via SSE stream
+      locationBus.publishLocationToGroups(authorizedGroups, {
+        deviceId: payload.deviceId,
         latitude: body.latitude,
         longitude: body.longitude,
         accuracy: body.accuracy ?? null,

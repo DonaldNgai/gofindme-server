@@ -16,6 +16,7 @@
     "test": "vitest",
     "test:coverage": "vitest --coverage",
     "test:ui": "vitest --ui",
+    "test:sse-subscriber": "tsx scripts/test-sse-subscriber.ts",
     "db:generate": "prisma generate",
     "db:pull": "prisma db pull",
     "db:push": "prisma db push",

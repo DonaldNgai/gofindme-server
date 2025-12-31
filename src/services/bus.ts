@@ -7,12 +7,24 @@ export type GroupEvent = {
 };
 
 class LocationBus extends EventEmitter {
+  /**
+   * Publish location to a single group
+   */
   publishLocation(groupId: string, payload: LocationUpdatePayload): void {
     const enriched: GroupEvent = {
       type: 'location',
       data: { ...payload, groupId },
     };
     this.emit(groupId, enriched);
+  }
+
+  /**
+   * Publish location to multiple groups (for authorized groups only)
+   */
+  publishLocationToGroups(groupIds: string[], payload: LocationUpdatePayload): void {
+    groupIds.forEach((groupId) => {
+      this.publishLocation(groupId, payload);
+    });
   }
 
   subscribe(groupId: string, listener: (event: GroupEvent) => void): () => void {

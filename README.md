@@ -49,6 +49,23 @@ pnpm test:coverage
 pnpm test:ui
 ```
 
+### Testing with Auth0 Tokens
+
+For tests that require Auth0 authentication, provide real Auth0 tokens via environment variables:
+
+```env
+# Optional: Test Auth0 tokens for authenticated test scenarios
+TEST_AUTH0_TOKEN_USER_1=your-auth0-token-here
+TEST_AUTH0_TOKEN_USER_2=another-auth0-token-here
+```
+
+These tokens should be real tokens from your Auth0 tenant. To get a token:
+1. Use your Auth0 dashboard to create a test token
+2. Or use the Auth0 Management API to generate tokens
+3. Or use Auth0's test token endpoint
+
+The test helper (`src/routes/public/tests/helpers/auth-helper.ts`) provides utilities to retrieve these tokens in tests.
+
 ## 🔍 Code Quality
 
 ```bash

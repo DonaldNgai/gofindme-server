@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import { prisma as db } from "../db.js";
 import { locationBus } from "../services/bus.js";
+import { findAuthorizedGroups } from "../services/location-auth.js";
 import { requireApiKey } from "../utils/api-key.js";
 import { zodToJsonSchemaFastify } from "../utils/zod-to-json-schema.js";
 
@@ -78,17 +79,24 @@ export async function registerLocationRoutes(app: FastifyInstance) {
         },
       });
 
-      locationBus.publishLocation(apiKey.group_id, {
-        deviceId: body.deviceId,
-        latitude: body.latitude,
-        longitude: body.longitude,
-        accuracy: body.accuracy ?? null,
-        heading: body.heading ?? null,
-        speed: body.speed ?? null,
-        recordedAt: body.recordedAt,
-        metadata: body.metadata ?? null,
-        payloadVersion: body.payloadVersion,
-      });
+      // Find all groups that are authorized to receive this location update
+      // Only groups where the user (deviceId) is a member AND have active API keys
+      const authorizedGroups = await findAuthorizedGroups(body.deviceId, apiKey.user_id);
+      
+      // Publish to all authorized groups (not just the API key's group)
+      if (authorizedGroups.length > 0) {
+        locationBus.publishLocationToGroups(authorizedGroups, {
+          deviceId: body.deviceId,
+          latitude: body.latitude,
+          longitude: body.longitude,
+          accuracy: body.accuracy ?? null,
+          heading: body.heading ?? null,
+          speed: body.speed ?? null,
+          recordedAt: body.recordedAt,
+          metadata: body.metadata ?? null,
+          payloadVersion: body.payloadVersion,
+        });
+      }
 
       reply.code(202).send({
         id: record.id,

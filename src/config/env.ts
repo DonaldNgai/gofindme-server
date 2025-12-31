@@ -17,6 +17,9 @@ const envSchema = z.object({
   AUTH0_AUDIENCE: z.string().optional(),
   AUTH0_M2M_CLIENT_ID: z.string().optional(),
   AUTH0_M2M_CLIENT_SECRET: z.string().optional(),
+  // Test Auth0 tokens (optional, only needed for tests)
+  TEST_AUTH0_TOKEN_USER_1: z.string().optional(),
+  TEST_AUTH0_TOKEN_USER_2: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
