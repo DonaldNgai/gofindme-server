@@ -2,15 +2,16 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } 
 import Fastify from 'fastify';
 import { buildApp } from '../../../app.js';
 import { prisma as db } from '../../../db.js';
-import { createApiKey } from '../../../services/api-keys.js';
 import { locationBus } from '../../../services/bus.js';
-import { getTestAuth0Token } from './helpers/auth-helper.js';
+import { generateFakeAuth0Token, generateFakeApiKey } from './helpers/test-auth.js';
 import type { LocationUpdatePayload } from '../../../types/location.js';
 
 /**
  * Performance and stress tests for location updates
  * These complement the focused authorization tests (incoming/outgoing)
  * by testing high-frequency and high-volume scenarios
+ * 
+ * Uses fake Auth0 tokens and API keys generated for testing.
  */
 describe('Location Updates - Performance and Stress Tests', () => {
   let fastify: ReturnType<typeof Fastify>;
@@ -30,75 +31,73 @@ describe('Location Updates - Performance and Stress Tests', () => {
   });
 
   beforeEach(async () => {
-    // Get Auth0 token (required for location submission)
-    testAuth0Token = getTestAuth0Token('1');
-    
-    if (!testAuth0Token) {
-      throw new Error(
-        'Auth0 token required for tests. Please set TEST_AUTH0_TOKEN_USER_1 environment variable.'
-      );
-    }
+    // Generate fake Auth0 token for test user
+    testUserId = 'test-user-123';
+    testAuth0Token = generateFakeAuth0Token(testUserId, 'test@test.example.com', 'Test User');
 
     // Clean up any existing test data first
-    await db.locations.deleteMany({
+    const existingGroups = await db.groups.findMany({
       where: {
-        group_id: { in: ['test-group-123'] },
-      },
-    });
-    await db.locations.deleteMany({
-      where: {
-        device_id: { in: ['test-user-123', 'user-1'] },
-      },
-    });
-    await db.group_members.deleteMany({
-      where: {
-        group_id: { in: ['test-group-123'] },
-      },
-    });
-    await db.api_keys.deleteMany({
-      where: {
-        group_id: { in: ['test-group-123'] },
-      },
-    });
-    await db.groups.deleteMany({
-      where: { id: { in: ['test-group-123'] } },
-    });
-    await db.users.deleteMany({
-      where: { id: { in: ['test-user-123', 'user-1'] } },
-    });
-
-    // Create test user - use 'user-1' to match Auth0 token sub claim
-    const user = await db.users.upsert({
-      where: { id: 'user-1' },
-      update: {
-        email: 'test@example.com',
-        name: 'Test User',
-      },
-      create: {
-        id: 'user-1',
-        email: 'test@example.com',
-        name: 'Test User',
-      },
-    });
-    testUserId = user.id;
-
-    // Create test group
-    const group = await db.groups.upsert({
-      where: { id: 'test-group-123' },
-      update: {
-        name: 'Test Group',
         owner_id: testUserId,
       },
+    });
+    const existingGroupIds = existingGroups.map((g) => g.id);
+
+    if (existingGroupIds.length > 0) {
+      await db.locations.deleteMany({
+        where: {
+          group_id: { in: existingGroupIds },
+        },
+      });
+      await db.group_members.deleteMany({
+        where: {
+          group_id: { in: existingGroupIds },
+        },
+      });
+      await db.api_keys.deleteMany({
+        where: {
+          group_id: { in: existingGroupIds },
+        },
+      });
+      await db.groups.deleteMany({
+        where: { id: { in: existingGroupIds } },
+      });
+    }
+
+    await db.locations.deleteMany({
+      where: {
+        device_id: testUserId,
+      },
+    });
+    await db.users.deleteMany({
+      where: { id: testUserId },
+    });
+
+    // Create test user
+    const user = await db.users.upsert({
+      where: { id: testUserId },
+      update: {
+        email: 'test@test.example.com',
+        name: 'Test User',
+      },
       create: {
-        id: 'test-group-123',
+        id: testUserId,
+        email: 'test@test.example.com',
+        name: 'Test User',
+      },
+    });
+
+    // Create test group (groups have auto-generated IDs)
+    const group = await db.groups.create({
+      data: {
         name: 'Test Group',
         owner_id: testUserId,
       },
     });
     testGroupId = group.id;
 
-    // Create test API key (for SSE subscription testing, not location submission)
-    testApiKey = await createApiKey(testGroupId, 'Test API Key', testUserId);
+    // Create fake API key (for SSE subscription testing, not location submission)
+    testApiKey = await generateFakeApiKey(testGroupId, 'Test API Key', testUserId);
 
     // Add user as member of the group (required for authorization)
     await db.group_members.upsert({
@@ -159,7 +158,7 @@ describe('Location Updates - Performance and Stress Tests', () => {
           method: 'POST',
           url: '/api/v1/locations',
           headers: {
-            'x-api-key': testApiKey,
+            'Authorization': `Bearer ${testAuth0Token}`,
           },
           payload: updates[i],
         });
@@ -191,10 +190,6 @@ describe('Location Updates - Performance and Stress Tests', () => {
     it('should handle high-frequency location updates', async () => {
       const numUpdates = 20;
       const updates: Array<{ id: string; receivedAt: string }> = [];
-
-      if (!testAuth0Token) {
-        throw new Error('Auth0 token required for this test');
-      }
 
       console.log(`[Test] Sending ${numUpdates} rapid location updates...`);
 

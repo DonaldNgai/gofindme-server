@@ -5,7 +5,7 @@ import { prisma as db } from '../../../db.js';
 import { createApiKey } from '../../../services/api-keys.js';
 import { locationBus } from '../../../services/bus.js';
 import { findAuthorizedGroups } from '../../../services/location-auth.js';
-import { getTestAuth0Token, extractSubFromToken } from './helpers/auth-helper.js';
+import { generateFakeAuth0Token, generateFakeApiKey } from './helpers/test-auth.js';
 import { getSSESubscriberHelper } from './helpers/sse-subscriber-helper.js';
 
 /**
@@ -47,81 +47,91 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
   });
 
   beforeEach(async () => {
-    // Read Auth0 tokens from environment variables (required for tests)
-    testAuth0Token1 = getTestAuth0Token('1');
-    testAuth0Token2 = getTestAuth0Token('2');
+    // Generate fake Auth0 tokens for test users
+    // Use fixed user IDs for consistency
+    testUserId1 = 'test-user-1';
+    testUserId2 = 'test-user-2';
+    
+    testAuth0Token1 = generateFakeAuth0Token(testUserId1, 'user1@test.example.com', 'Test User 1');
+    testAuth0Token2 = generateFakeAuth0Token(testUserId2, 'user2@test.example.com', 'Test User 2');
 
-    if (!testAuth0Token1 || !testAuth0Token2) {
-      throw new Error(
-        'Auth0 tokens required for tests. Please set TEST_AUTH0_TOKEN_USER_1 and TEST_AUTH0_TOKEN_USER_2 environment variables.'
-      );
-    }
+    console.log(`[Test] Generated fake tokens - User1: ${testUserId1}, User2: ${testUserId2}`);
 
     // Clean up any existing test data first (in case previous test failed)
-    // Clean up locations by group_id
+    // Find groups owned by our test users
+    const existingGroups = await db.groups.findMany({
+      where: {
+        owner_id: { in: [testUserId1, testUserId2] },
+      },
+    });
+    const existingGroupIds = existingGroups.map((g) => g.id);
+
+    if (existingGroupIds.length > 0) {
+      await db.locations.deleteMany({
+        where: {
+          group_id: { in: existingGroupIds },
+        },
+      });
+      await db.group_members.deleteMany({
+        where: {
+          group_id: { in: existingGroupIds },
+        },
+      });
+      await db.api_keys.deleteMany({
+        where: {
+          group_id: { in: existingGroupIds },
+        },
+      });
+      await db.groups.deleteMany({
+        where: { id: { in: existingGroupIds } },
+      });
+    }
+
+    // Also clean up locations by device_id
     await db.locations.deleteMany({
       where: {
-        group_id: { in: ['group-1', 'group-2', 'group-3', 'group-no-key'] },
+        device_id: { in: [testUserId1, testUserId2, 'orphan-user'] },
       },
-    });
-    // Also clean up locations by device_id for orphan users
-    await db.locations.deleteMany({
-      where: {
-        device_id: { in: ['orphan-user', 'user-1', 'user-2'] },
-      },
-    });
-    await db.group_members.deleteMany({
-      where: {
-        group_id: { in: ['group-1', 'group-2', 'group-3', 'group-no-key'] },
-      },
-    });
-    await db.api_keys.deleteMany({
-      where: {
-        group_id: { in: ['group-1', 'group-2', 'group-3', 'group-no-key'] },
-      },
-    });
-    await db.groups.deleteMany({
-      where: { id: { in: ['group-1', 'group-2', 'group-3', 'group-no-key'] } },
-    });
-    await db.users.deleteMany({
-      where: { id: { in: ['user-1', 'user-2', 'orphan-user'] } },
     });
 
-    // Create test users with IDs that match Auth0 sub claims
-    // For testing, we'll use fixed IDs that should match the Auth0 tokens
-    // In real usage, the IDs come from auth.sub
+    // Clean up users
+    await db.users.deleteMany({
+      where: { id: { in: [testUserId1, testUserId2, 'orphan-user'] } },
+    });
+
+    // Create test users with the fixed IDs
     const user1 = await db.users.upsert({
-      where: { id: 'user-1' },
+      where: { id: testUserId1 },
       update: {
-        email: 'user1@example.com',
-        name: 'User 1',
+        email: 'user1@test.example.com',
+        name: 'Test User 1',
       },
       create: {
-        id: 'user-1',
-        email: 'user1@example.com',
-        name: 'User 1',
+        id: testUserId1,
+        email: 'user1@test.example.com',
+        name: 'Test User 1',
       },
     });
-    testUserId1 = user1.id;
 
     const user2 = await db.users.upsert({
-      where: { id: 'user-2' },
+      where: { id: testUserId2 },
       update: {
-        email: 'user2@example.com',
-        name: 'User 2',
+        email: 'user2@test.example.com',
+        name: 'Test User 2',
       },
       create: {
-        id: 'user-2',
-        email: 'user2@example.com',
-        name: 'User 2',
+        id: testUserId2,
+        email: 'user2@test.example.com',
+        name: 'Test User 2',
       },
     });
-    testUserId2 = user2.id;
 
-    // Create test groups
+    console.log(`[Test] Created users - User1: ${user1.id}, User2: ${user2.id}`);
+
+    // Create test groups with the correct owner IDs (matching token sub claims)
+    // Note: Groups use auto-generated IDs, so we can't set custom IDs
     const group1 = await db.groups.create({
       data: {
-        id: 'group-1',
         name: 'Group 1',
         owner_id: testUserId1,
       },
@@ -130,7 +140,6 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
 
     const group2 = await db.groups.create({
       data: {
-        id: 'group-2',
         name: 'Group 2',
         owner_id: testUserId1,
       },
@@ -139,17 +148,31 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
 
     const group3 = await db.groups.create({
       data: {
-        id: 'group-3',
         name: 'Group 3',
         owner_id: testUserId2,
       },
     });
     testGroup3Id = group3.id;
 
-    // Create API keys for each group (representing developer apps)
-    testApiKey1 = await createApiKey(testGroup1Id, 'App 1 API Key', testUserId1);
-    testApiKey2 = await createApiKey(testGroup2Id, 'App 2 API Key', testUserId1);
-    testApiKey3 = await createApiKey(testGroup3Id, 'App 3 API Key', testUserId2);
+    console.log(`[Test] Created groups - Group1: ${testGroup1Id}, Group2: ${testGroup2Id}, Group3: ${testGroup3Id}`);
+
+    // Verify users exist before creating API keys (to avoid foreign key constraint errors)
+    const verifyUser1 = await db.users.findUnique({ where: { id: testUserId1 } });
+    const verifyUser2 = await db.users.findUnique({ where: { id: testUserId2 } });
+    
+    if (!verifyUser1) {
+      throw new Error(`User ${testUserId1} was not created properly`);
+    }
+    if (!verifyUser2) {
+      throw new Error(`User ${testUserId2} was not created properly`);
+    }
+
+    // Create fake API keys for each group (representing developer apps)
+    testApiKey1 = await generateFakeApiKey(testGroup1Id, 'App 1 API Key', testUserId1);
+    testApiKey2 = await generateFakeApiKey(testGroup2Id, 'App 2 API Key', testUserId1);
+    testApiKey3 = await generateFakeApiKey(testGroup3Id, 'App 3 API Key', testUserId2);
+
+    console.log(`[Test] Generated API keys for groups`);
 
 
     // Add user1 as member of group1 and group2 (accepted status)
@@ -390,10 +413,9 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
     });
 
     it('should not notify groups without active API keys', async () => {
-      // Create a group with no API keys
+      // Create a group with no API keys (groups have auto-generated IDs)
       const groupWithoutApiKey = await db.groups.create({
         data: {
-          id: 'group-no-key',
           name: 'Group Without API Key',
           owner_id: testUserId1,
         },
