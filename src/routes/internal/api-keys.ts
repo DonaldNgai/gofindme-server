@@ -253,70 +253,100 @@ export async function registerInternalApiKeyRoutes(app: FastifyInstance) {
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      // Verify Auth0 access token and get user's sub
-      const auth = await requireAuth(request, reply);
-      const { keyId } = request.params as { keyId: string };
+      try {
+        // Verify Auth0 access token and get user's sub
+        const auth = await requireAuth(request, reply);
+        const { keyId } = request.params as { keyId: string };
 
-      // auth.sub is guaranteed to exist from requireAuth
-      const userId = auth.sub;
+        request.log.info({ keyId }, 'Attempting to revoke API key');
 
-      // Find or create user using the sub from token
-      let user = await db.users.findFirst({
-        where: {
-          OR: [{ email: auth.email as string }, { id: userId }],
-        },
-      });
+        // auth.sub is guaranteed to exist from requireAuth
+        const userId = auth.sub;
 
-      if (!user) {
-        // If email is not in token, query Auth0 Management API to get user info
-        let userEmail = auth.email;
-        let userName = auth.name;
-
-        if (!userEmail) {
-          const auth0User = await getUserFromAuth0(userId);
-          if (auth0User) {
-            userEmail = auth0User.email;
-            userName = auth0User.name || userName;
-          }
-        }
-
-        // Fallback to generated email if still not available
-        if (!userEmail) {
-          userEmail = `${userId}@auth0.local`;
-        }
-
-        user = await db.users.create({
-          data: {
-            id: userId, // Use Auth0 sub as the user ID
-            email: userEmail,
-            name: userName as string | undefined,
+        // Find or create user using the sub from token
+        let user = await db.users.findFirst({
+          where: {
+            OR: [{ email: auth.email as string }, { id: userId }],
           },
         });
+
+        if (!user) {
+          // If email is not in token, query Auth0 Management API to get user info
+          let userEmail = auth.email;
+          let userName = auth.name;
+
+          if (!userEmail) {
+            const auth0User = await getUserFromAuth0(userId);
+            if (auth0User) {
+              userEmail = auth0User.email;
+              userName = auth0User.name || userName;
+            }
+          }
+
+          // Fallback to generated email if still not available
+          if (!userEmail) {
+            userEmail = `${userId}@auth0.local`;
+          }
+
+          user = await db.users.create({
+            data: {
+              id: userId, // Use Auth0 sub as the user ID
+              email: userEmail,
+              name: userName as string | undefined,
+            },
+          });
+        }
+
+        // Find API key and verify ownership
+        const apiKey = await db.api_keys.findFirst({
+          where: { id: keyId },
+          include: { groups: true },
+        });
+
+        if (!apiKey) {
+          request.log.warn({ keyId }, 'API key not found');
+          reply.code(404);
+          throw new Error('API key not found');
+        }
+
+        request.log.info(
+          { keyId, groupOwnerId: apiKey.groups.owner_id, userId: user.id },
+          'Checking API key ownership'
+        );
+
+        // Verify user owns the group (using sub from token)
+        if (apiKey.groups.owner_id !== user.id) {
+          request.log.warn(
+            { keyId, groupOwnerId: apiKey.groups.owner_id, userId: user.id },
+            'Permission denied: user does not own the group'
+          );
+          reply.code(403);
+          throw new Error('You do not have permission to revoke this API key');
+        }
+
+        // Check if already revoked (if using soft delete) or deleted
+        if (apiKey.revoked_at) {
+          request.log.info({ keyId, revokedAt: apiKey.revoked_at }, 'API key already revoked, deleting from database');
+          // If already revoked, just delete it
+          await db.api_keys.delete({
+            where: { id: keyId },
+          });
+          request.log.info({ keyId }, 'API key deleted from database');
+          return reply.send({ success: true, message: 'API key was already revoked and has been deleted' });
+        }
+
+        // Hard delete: Actually remove the key from the database
+        await db.api_keys.delete({
+          where: { id: keyId },
+        });
+
+        request.log.info({ keyId }, 'API key deleted from database');
+
+        reply.send({ success: true });
+      } catch (error: any) {
+        request.log.error({ error: error.message, stack: error.stack }, 'Error revoking API key');
+        throw error;
       }
-
-      // Find API key and verify ownership
-      const apiKey = await db.api_keys.findFirst({
-        where: { id: keyId },
-        include: { groups: true },
-      });
-
-      if (!apiKey) {
-        reply.code(404);
-        throw new Error('API key not found');
-      }
-
-      // Verify user owns the group (using sub from token)
-      if (apiKey.groups.owner_id !== user.id) {
-        reply.code(403);
-        throw new Error('You do not have permission to revoke this API key');
-      }
-
-      await db.api_keys.update({
-        where: { id: keyId },
-        data: { revoked_at: new Date() },
-      });
-
-      reply.send({ success: true });
     }
   );
 }

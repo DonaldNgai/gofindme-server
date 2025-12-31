@@ -7,6 +7,7 @@ import { registerHelmet } from './plugins/helmet.js';
 import { healthRoutes } from './routes/health.js';
 import { registerInternalRoutes } from './routes/internal/index.js';
 import { registerPublicRoutes } from './routes/public/index.js';
+import { registerReadmeRoutes } from './routes/readme.js';
 import { env } from './config/env.js';
 
 export async function buildApp(fastify: FastifyInstance) {
@@ -98,28 +99,8 @@ export async function buildApp(fastify: FastifyInstance) {
     }
   );
 
-  // OpenAPI spec endpoint for Readme.com integration
-  fastify.get('/openapi.json', async (_request, reply) => {
-    const spec = (fastify as any).swagger();
-    reply.type('application/json').send(spec);
-  });
-
-  // Readme.com webhook endpoint for automatic spec updates
-  fastify.post('/readme/webhook', async (request, reply) => {
-    const readmeApiKey = env.README_API_KEY;
-    const providedKey = request.headers['x-readme-api-key'];
-
-    // Verify Readme.com API key if configured
-    if (readmeApiKey && providedKey !== readmeApiKey) {
-      reply.code(401);
-      reply.send({ error: 'Invalid Readme.com API key' });
-      return;
-    }
-
-    // Return the OpenAPI spec for Readme.com to consume
-    const spec = (fastify as any).swagger();
-    reply.type('application/json').send(spec);
-  });
+  // Register Readme.com integration routes (no prefix - root level)
+  await fastify.register(registerReadmeRoutes);
 
   // Register public routes (for npm package / API key users)
   // These are documented in Swagger and part of the public API
