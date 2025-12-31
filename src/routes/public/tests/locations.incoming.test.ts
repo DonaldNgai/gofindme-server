@@ -10,14 +10,14 @@ import { getSSESubscriberHelper } from './helpers/sse-subscriber-helper.js';
 
 /**
  * Tests for location data COMING IN from users
- * 
+ *
  * These tests focus on:
  * - Users (authenticated via Auth0) sending location data
  * - Authorization logic: ensuring location data is only sent to apps
  *   that are authorized to receive data for users in their groups
  * - Group membership verification
  * - Multiple users in multiple groups scenarios
- * 
+ *
  * Auth0 tokens are read from environment variables:
  * - TEST_AUTH0_TOKEN_USER_1: Token for user 1
  * - TEST_AUTH0_TOKEN_USER_2: Token for user 2
@@ -51,7 +51,7 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
     // Use fixed user IDs for consistency
     testUserId1 = 'test-user-1';
     testUserId2 = 'test-user-2';
-    
+
     testAuth0Token1 = generateFakeAuth0Token(testUserId1, 'user1@test.example.com', 'Test User 1');
     testAuth0Token2 = generateFakeAuth0Token(testUserId2, 'user2@test.example.com', 'Test User 2');
 
@@ -154,12 +154,14 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
     });
     testGroup3Id = group3.id;
 
-    console.log(`[Test] Created groups - Group1: ${testGroup1Id}, Group2: ${testGroup2Id}, Group3: ${testGroup3Id}`);
+    console.log(
+      `[Test] Created groups - Group1: ${testGroup1Id}, Group2: ${testGroup2Id}, Group3: ${testGroup3Id}`
+    );
 
     // Verify users exist before creating API keys (to avoid foreign key constraint errors)
     const verifyUser1 = await db.users.findUnique({ where: { id: testUserId1 } });
     const verifyUser2 = await db.users.findUnique({ where: { id: testUserId2 } });
-    
+
     if (!verifyUser1) {
       throw new Error(`User ${testUserId1} was not created properly`);
     }
@@ -173,7 +175,6 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
     testApiKey3 = await generateFakeApiKey(testGroup3Id, 'App 3 API Key', testUserId2);
 
     console.log(`[Test] Generated API keys for groups`);
-
 
     // Add user1 as member of group1 and group2 (accepted status)
     await db.group_members.upsert({
@@ -228,13 +229,19 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
       },
     });
 
-    console.log(`[Test] Added group memberships - User1 in [${testGroup1Id}, ${testGroup2Id}], User2 in [${testGroup2Id}]`);
+    console.log(
+      `[Test] Added group memberships - User1 in [${testGroup1Id}, ${testGroup2Id}], User2 in [${testGroup2Id}]`
+    );
   });
 
   afterEach(async () => {
     // Clean up test data - filter out undefined values
-    const groupIds = [testGroup1Id, testGroup2Id, testGroup3Id].filter((id): id is string => id !== undefined);
-    const userIds = [testUserId1, testUserId2, 'orphan-user'].filter((id): id is string => id !== undefined);
+    const groupIds = [testGroup1Id, testGroup2Id, testGroup3Id].filter(
+      (id): id is string => id !== undefined
+    );
+    const userIds = [testUserId1, testUserId2, 'orphan-user'].filter(
+      (id): id is string => id !== undefined
+    );
 
     // Clean up locations by group_id
     if (groupIds.length > 0) {
@@ -244,7 +251,7 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
         },
       });
     }
-    
+
     // Clean up locations by device_id for all user IDs
     if (userIds.length > 0) {
       await db.locations.deleteMany({
@@ -262,7 +269,7 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
         },
       });
       const userOwnedGroupIds = userOwnedGroups.map((g) => g.id);
-      
+
       if (userOwnedGroupIds.length > 0) {
         await db.locations.deleteMany({
           where: {
@@ -334,7 +341,7 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
         method: 'POST',
         url: '/api/v1/locations',
         headers: {
-          'Authorization': `Bearer ${testAuth0Token1}`,
+          Authorization: `Bearer ${testAuth0Token1}`,
         },
         payload: {
           deviceId: testUserId1, // deviceId matches userId
@@ -358,7 +365,9 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
       const group2Events = busEvents.filter((e) => e.groupId === testGroup2Id);
       const group3Events = busEvents.filter((e) => e.groupId === testGroup3Id);
 
-      console.log(`[Test] Events received - Group1: ${group1Events.length}, Group2: ${group2Events.length}, Group3: ${group3Events.length}`);
+      console.log(
+        `[Test] Events received - Group1: ${group1Events.length}, Group2: ${group2Events.length}, Group3: ${group3Events.length}`
+      );
       console.log(`[Test] All bus events:`, busEvents);
 
       expect(group1Events.length).toBeGreaterThan(0);
@@ -486,12 +495,12 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
 
     it('should store location with correct group association', async () => {
       console.log('[Test] Testing location storage with correct group association...');
-      
+
       const response = await fastify.inject({
         method: 'POST',
         url: '/api/v1/locations',
         headers: {
-          'Authorization': `Bearer ${testAuth0Token1}`,
+          Authorization: `Bearer ${testAuth0Token1}`,
         },
         payload: {
           deviceId: testUserId1,
@@ -517,7 +526,10 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
         where: { id: body.id },
       });
 
-      console.log(`[Test] Stored location:`, stored ? { group_id: stored.group_id, device_id: stored.device_id } : 'NOT FOUND');
+      console.log(
+        `[Test] Stored location:`,
+        stored ? { group_id: stored.group_id, device_id: stored.device_id } : 'NOT FOUND'
+      );
       console.log(`[Test] Expected group_id:`, testGroup1Id);
 
       expect(stored).toBeTruthy();
@@ -529,7 +541,7 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
   describe('Multiple Users and Groups', () => {
     it('should handle location updates from multiple users correctly', async () => {
       console.log('[Test] Testing multiple users and groups...');
-      
+
       const busEvents: Record<string, Array<{ groupId: string; deviceId: string }>> = {
         [testGroup1Id]: [],
         [testGroup2Id]: [],
@@ -558,7 +570,7 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
         method: 'POST',
         url: '/api/v1/locations',
         headers: {
-          'Authorization': `Bearer ${testAuth0Token1}`,
+          Authorization: `Bearer ${testAuth0Token1}`,
         },
         payload: {
           deviceId: testUserId1,
@@ -575,7 +587,7 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
         method: 'POST',
         url: '/api/v1/locations',
         headers: {
-          'Authorization': `Bearer ${testAuth0Token2}`,
+          Authorization: `Bearer ${testAuth0Token2}`,
         },
         payload: {
           deviceId: testUserId2,
@@ -589,7 +601,9 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
       // Wait for events
       await new Promise((resolve) => setTimeout(resolve, 300));
 
-      console.log(`[Test] Events - Group1: ${busEvents[testGroup1Id].length}, Group2: ${busEvents[testGroup2Id].length}, Group3: ${busEvents[testGroup3Id].length}`);
+      console.log(
+        `[Test] Events - Group1: ${busEvents[testGroup1Id].length}, Group2: ${busEvents[testGroup2Id].length}, Group3: ${busEvents[testGroup3Id].length}`
+      );
 
       // Group1 should only receive user1's location
       expect(busEvents[testGroup1Id].length).toBeGreaterThan(0);
@@ -609,27 +623,30 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
   });
 
   describe('SSE Stream Integration with Test Subscriber', () => {
-    const subscriber = getSSESubscriberHelper();
+    let subscriber: ReturnType<typeof getSSESubscriberHelper> | null = null;
     let subscriberStarted = false;
 
-    // Start subscriber before all tests in this describe block
+    // Initialize subscriber before all tests in this describe block
     beforeAll(async () => {
       try {
-        console.log('[Test] Starting SSE subscriber for integration tests...');
-        await subscriber.start();
-        subscriberStarted = true;
-        console.log('[Test] SSE subscriber started successfully');
-        
-        // Verify it's actually running
-        const isRunning = await subscriber.isRunning();
-        if (!isRunning) {
-          console.warn('[Test] WARNING: Subscriber process started but health check failed');
-        } else {
-          console.log('[Test] SSE subscriber health check passed');
+        // Get server URL from fastify instance
+        const serverAddress = fastify.server.address();
+        let serverUrl = 'http://localhost:3000';
+
+        if (serverAddress && typeof serverAddress === 'object') {
+          const host = serverAddress.address === '::' ? 'localhost' : serverAddress.address;
+          const port = serverAddress.port;
+          serverUrl = `http://${host}:${port}`;
         }
+
+        console.log('[Test] Initializing SSE subscriber for integration tests...');
+        console.log('[Test] Server URL:', serverUrl);
+        subscriber = getSSESubscriberHelper(serverUrl);
+        await subscriber!.start();
+        subscriberStarted = true;
+        console.log('[Test] SSE subscriber initialized successfully');
       } catch (error: any) {
-        console.error('[Test] Failed to start SSE subscriber:', error.message);
-        console.error('[Test] Make sure tsx is installed: pnpm add -D tsx');
+        console.error('[Test] Failed to initialize SSE subscriber:', error.message);
         console.error('[Test] Tests in this section will be skipped.');
         subscriberStarted = false;
       }
@@ -637,10 +654,10 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
 
     // Stop subscriber after all tests
     afterAll(async () => {
-      if (subscriberStarted) {
-        console.log('[Test] Stopping SSE subscriber...');
+      if (subscriberStarted && subscriber) {
+        console.log('[Test] Stopping SSE subscriber!...');
         try {
-          await subscriber.stop();
+          await subscriber!.stop();
           console.log('[Test] SSE subscriber stopped');
         } catch (error: any) {
           console.error('[Test] Error stopping subscriber:', error.message);
@@ -650,18 +667,18 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
 
     describe('API Key Validation', () => {
       it('should reject invalid API key', async () => {
-        if (!subscriberStarted) {
+        if (!subscriberStarted || !subscriber) {
           console.warn('[Test] Skipping: Test subscriber not running');
           return;
         }
 
         console.log('[Test] Testing invalid API key rejection...');
-        
+
         // Reset state
-        await subscriber.reset();
+        await subscriber!.reset();
 
         // Try to connect with invalid API key
-        const result = await subscriber.connect('invalid-api-key-123');
+        const result = await subscriber!.connect('invalid-api-key-123');
 
         console.log('[Test] Connection result:', JSON.stringify(result, null, 2));
 
@@ -679,7 +696,7 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
         console.log('[Test] Testing missing API key rejection...');
 
         // Reset state
-        await subscriber.reset();
+        await subscriber!.reset();
 
         // Try to connect without API key (will fail at HTTP level)
         // The helper's connect method requires an apiKey, so we test the HTTP endpoint directly
@@ -701,7 +718,6 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
         }
       });
 
-
       it('should accept valid API key', async () => {
         if (!subscriberStarted) {
           console.warn('[Test] Skipping: Test subscriber not running');
@@ -711,11 +727,11 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
         console.log('[Test] Testing valid API key acceptance...');
 
         // Reset state
-        await subscriber.reset();
+        await subscriber!.reset();
 
         // Connect with valid API key
         console.log(`[Test] Connecting with API key: ${testApiKey1.substring(0, 12)}...`);
-        const result = await subscriber.connect(testApiKey1);
+        const result = await subscriber!.connect(testApiKey1);
 
         console.log('[Test] Connection result:', JSON.stringify(result, null, 2));
 
@@ -727,7 +743,7 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
         await new Promise((resolve) => setTimeout(resolve, 500));
 
         // Check health to verify connection
-        const health = await subscriber.getHealth();
+        const health = await subscriber!.getHealth();
         console.log('[Test] Health status:', JSON.stringify(health, null, 2));
 
         expect(health.connected).toBe(true);
@@ -735,7 +751,7 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
         expect(health.groupId).toBe(testGroup1Id);
 
         // Disconnect
-        await subscriber.disconnect();
+        await subscriber!.disconnect();
         console.log('[Test] Disconnected successfully');
       });
     });
@@ -750,8 +766,8 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
         console.log('[Test] Testing location update delivery via SSE...');
 
         // Reset and connect with valid API key
-        await subscriber.reset();
-        const connectResult = await subscriber.connect(testApiKey1);
+        await subscriber!.reset();
+        const connectResult = await subscriber!.connect(testApiKey1);
 
         expect(connectResult.success).toBe(true);
         console.log('[Test] Connected to SSE stream');
@@ -760,7 +776,7 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
         await new Promise((resolve) => setTimeout(resolve, 500));
 
         // Check which group the subscriber is listening to
-        const health = await subscriber.getHealth();
+        const health = await subscriber!.getHealth();
 
         if (!health.ready || !health.groupId) {
           throw new Error('SSE subscriber is not ready');
@@ -773,7 +789,7 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
           console.warn(
             `[Test] Skipping: Subscriber is listening to group ${subscriberGroupId}, but test groups are ${testGroup1Id} and ${testGroup2Id}`
           );
-          await subscriber.disconnect();
+          await subscriber!.disconnect();
           return;
         }
 
@@ -792,7 +808,7 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
 
         console.log('[Test] Setting expectations for location update...');
         // Set expectations
-        await subscriber.expectLocations(`test-${Date.now()}`, [expectedLocation]);
+        await subscriber!.expectLocations(`test-${Date.now()}`, [expectedLocation]);
 
         // Wait a bit for expectations to be set
         await new Promise((resolve) => setTimeout(resolve, 100));
@@ -803,7 +819,7 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
           method: 'POST',
           url: '/api/v1/locations',
           headers: {
-            'Authorization': `Bearer ${testToken}`,
+            Authorization: `Bearer ${testToken}`,
           },
           payload: {
             deviceId: testUserId,
@@ -818,7 +834,7 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
         await new Promise((resolve) => setTimeout(resolve, 500));
 
         // Validate results
-        const { success, results } = await subscriber.validateLocations(1000);
+        const { success, results } = await subscriber!.validateLocations(1000);
 
         console.log('[Test] Validation result:', { success, resultsCount: results.length });
 
@@ -827,12 +843,12 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
         expect(results[0].matched).toBe(true);
 
         // Disconnect
-        await subscriber.disconnect();
+        await subscriber!.disconnect();
         console.log('[Test] Test completed successfully');
       }, 10000);
 
       it('should handle multiple location updates in sequence via SSE', async () => {
-        if (!subscriberStarted) {
+        if (!subscriberStarted || !subscriber) {
           console.warn('[Test] Skipping: Test subscriber not running');
           return;
         }
@@ -840,8 +856,8 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
         console.log('[Test] Testing multiple location updates in sequence...');
 
         // Reset and connect with valid API key
-        await subscriber.reset();
-        const connectResult = await subscriber.connect(testApiKey1);
+        await subscriber!.reset();
+        const connectResult = await subscriber!.connect(testApiKey1);
 
         expect(connectResult.success).toBe(true);
         console.log('[Test] Connected to SSE stream');
@@ -849,7 +865,7 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
         // Wait for ready event
         await new Promise((resolve) => setTimeout(resolve, 500));
 
-        const health = await subscriber.getHealth();
+        const health = await subscriber!.getHealth();
 
         if (!health.ready || !health.groupId) {
           throw new Error('SSE subscriber is not ready');
@@ -860,7 +876,7 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
         // Only test if subscriber is listening to one of our test groups
         if (subscriberGroupId !== testGroup1Id && subscriberGroupId !== testGroup2Id) {
           console.warn('[Test] Skipping: Subscriber group mismatch');
-          await subscriber.disconnect();
+          await subscriber!.disconnect();
           return;
         }
 
@@ -875,9 +891,11 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
           { deviceId: testUserId, latitude: 37.7751, longitude: -122.4196, groupId: testGroupId },
         ];
 
-        console.log(`[Test] Setting expectations for ${expectedLocations.length} location updates...`);
+        console.log(
+          `[Test] Setting expectations for ${expectedLocations.length} location updates...`
+        );
         // Set expectations
-        await subscriber.expectLocations(`test-${Date.now()}`, expectedLocations);
+        await subscriber!.expectLocations(`test-${Date.now()}`, expectedLocations);
 
         // Wait a bit for expectations to be set
         await new Promise((resolve) => setTimeout(resolve, 100));
@@ -888,7 +906,7 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
             method: 'POST',
             url: '/api/v1/locations',
             headers: {
-              'Authorization': `Bearer ${testToken}`,
+              Authorization: `Bearer ${testToken}`,
             },
             payload: {
               deviceId: loc.deviceId,
@@ -904,7 +922,7 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
         // Wait for events to arrive, then validate
         await new Promise((resolve) => setTimeout(resolve, 1000));
 
-        const { success, results } = await subscriber.validateLocations(1000);
+        const { success, results } = await subscriber!.validateLocations(1000);
 
         // Validate results
         expect(success).toBe(true);
@@ -912,7 +930,7 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
         expect(results.every((r: any) => r.matched)).toBe(true);
 
         // Disconnect
-        await subscriber.disconnect();
+        await subscriber!.disconnect();
       }, 15000);
     });
   });

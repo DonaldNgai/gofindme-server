@@ -1,21 +1,10 @@
 /**
- * Helper for managing the SSE subscriber test process
- * 
- * This helper manages the lifecycle of the test SSE subscriber script,
- * allowing tests to automatically start/stop it as needed.
+ * Helper for managing SSE subscriber in tests
+ *
+ * This helper provides an in-process SSE client that connects directly
+ * to the Fastify server's /stream endpoint, avoiding the need for
+ * a separate process.
  */
-
-import { spawn, ChildProcess } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const PROJECT_ROOT = join(__dirname, '../../../../');
-const SUBSCRIBER_SCRIPT = join(PROJECT_ROOT, 'scripts/test-sse-subscriber.ts');
-
-const COORDINATOR_URL = process.env.TEST_COORDINATOR_URL || 'http://localhost:3002';
-const COORDINATOR_PORT = parseInt(process.env.TEST_COORDINATOR_PORT || '3002', 10);
 
 export type SubscriberConnectionResult = {
   success: boolean;
@@ -27,155 +16,222 @@ export type SubscriberConnectionResult = {
   groupId?: string | null;
 };
 
+type ExpectedLocation = {
+  deviceId: string;
+  latitude: number;
+  longitude: number;
+  groupId?: string;
+};
+
+type ReceivedLocation = {
+  deviceId: string;
+  latitude: number;
+  longitude: number;
+  groupId?: string;
+  receivedAt: string;
+};
+
 export class SSESubscriberHelper {
-  private process: ChildProcess | null = null;
-  private isReady = false;
+  private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  private isConnected = false;
+  private currentApiKey: string | null = null;
+  private connectionResult: SubscriberConnectionResult | null = null;
+  private receivedLocations: ReceivedLocation[] = [];
+  private expectedLocations: ExpectedLocation[] = [];
+  private testId: string | null = null;
+  private serverBaseUrl: string;
 
-  /**
-   * Start the SSE subscriber process
-   */
-  async start(): Promise<void> {
-    if (this.process) {
-      return; // Already started
-    }
-
-    return new Promise((resolve, reject) => {
-      // Spawn the subscriber script
-      this.process = spawn('tsx', [SUBSCRIBER_SCRIPT], {
-        cwd: PROJECT_ROOT,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: {
-          ...process.env,
-          TEST_COORDINATOR_PORT: COORDINATOR_PORT.toString(),
-        },
-      });
-
-      let output = '';
-
-      const checkReady = () => {
-        if (output.includes('Ready for test coordination')) {
-          this.isReady = true;
-          resolve();
-        }
-      };
-
-      this.process.stdout?.on('data', (data) => {
-        output += data.toString();
-        checkReady();
-      });
-
-      this.process.stderr?.on('data', (data) => {
-        output += data.toString();
-        // Don't treat stderr as error - the script logs to stderr
-      });
-
-      this.process.on('error', (error) => {
-        reject(new Error(`Failed to start SSE subscriber: ${error.message}`));
-      });
-
-      // Timeout after 10 seconds
-      setTimeout(() => {
-        if (!this.isReady) {
-          reject(new Error('SSE subscriber failed to start within 10 seconds'));
-        }
-      }, 10000);
-    });
+  constructor(serverBaseUrl: string = 'http://localhost:3000') {
+    this.serverBaseUrl = serverBaseUrl;
   }
 
   /**
-   * Stop the SSE subscriber process
+   * Start the SSE subscriber (no-op for in-process version)
+   */
+  async start(): Promise<void> {
+    // No-op - we connect directly when connect() is called
+    console.log('[SSE Helper] In-process SSE subscriber ready');
+  }
+
+  /**
+   * Stop the SSE subscriber
    */
   async stop(): Promise<void> {
-    if (!this.process) {
-      console.log('[SSE Helper] No process to stop');
-      return;
-    }
-
-    console.log('[SSE Helper] Stopping SSE subscriber...');
-
-    return new Promise((resolve) => {
-      if (this.process) {
-        this.process.on('exit', () => {
-          console.log('[SSE Helper] Subscriber stopped');
-          this.process = null;
-          this.isReady = false;
-          resolve();
-        });
-
-        this.process.kill('SIGINT');
-        
-        // Force kill after 5 seconds
-        setTimeout(() => {
-          if (this.process) {
-            console.log('[SSE Helper] Force killing subscriber');
-            this.process.kill('SIGKILL');
-            this.process = null;
-            this.isReady = false;
-            resolve();
-          }
-        }, 5000);
-      } else {
-        resolve();
-      }
-    });
+    await this.disconnect();
   }
 
   /**
    * Check if the subscriber is running and ready
    */
   async isRunning(): Promise<boolean> {
-    try {
-      const response = await fetch(`${COORDINATOR_URL}/health`);
-      return response.ok;
-    } catch {
-      return false;
-    }
+    return this.isConnected && this.reader !== null;
   }
 
   /**
    * Connect to SSE stream with an API key
    */
   async connect(apiKey: string): Promise<SubscriberConnectionResult> {
-    const response = await fetch(`${COORDINATOR_URL}/connect`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apiKey }),
-    });
+    // Disconnect existing connection if any
+    await this.disconnect();
 
-    return response.json();
+    this.currentApiKey = apiKey;
+    const result: SubscriberConnectionResult = {
+      success: false,
+    };
+
+    return new Promise((resolve) => {
+      try {
+        // Create EventSource with API key in header
+        // Note: EventSource doesn't support custom headers, so we need to use fetch + manual parsing
+        const url = `${this.serverBaseUrl}/api/v1/stream`;
+
+        fetch(url, {
+          headers: {
+            'X-API-Key': apiKey,
+            Accept: 'text/event-stream',
+          },
+        })
+          .then(async (response) => {
+            if (!response.ok) {
+              result.success = false;
+              result.statusCode = response.status;
+              result.statusText = response.statusText;
+              result.error = await response.text().catch(() => 'Unknown error');
+              result.connectedAt = new Date().toISOString();
+              this.connectionResult = result;
+              resolve(result);
+              return;
+            }
+
+            result.success = true;
+            result.statusCode = response.status;
+            result.connectedAt = new Date().toISOString();
+            this.connectionResult = result;
+
+            // Parse SSE stream manually
+            const streamReader = response.body?.getReader();
+            if (streamReader) {
+              this.reader = streamReader;
+              this.isConnected = true;
+
+              const decoder = new TextDecoder();
+              let buffer = '';
+
+              const readChunk = async () => {
+                try {
+                  if (!this.reader) return;
+
+                  const { done, value } = await this.reader.read();
+                  if (done) {
+                    this.isConnected = false;
+                    result.disconnectedAt = new Date().toISOString();
+                    this.connectionResult = result;
+                    return;
+                  }
+
+                  buffer += decoder.decode(value, { stream: true });
+                  const lines = buffer.split('\n');
+                  buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+                  for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i];
+                    if (line.startsWith('event: ')) {
+                      const eventType = line.slice(7);
+                      const dataLine = lines[i + 1];
+                      if (dataLine?.startsWith('data: ')) {
+                        const data = JSON.parse(dataLine.slice(6));
+                        this.handleSSEEvent(eventType, data);
+                      }
+                    } else if (line.startsWith('data: ')) {
+                      const data = JSON.parse(line.slice(6));
+                      this.handleSSEEvent('message', data);
+                    }
+                  }
+
+                  await readChunk();
+                } catch (error) {
+                  console.error('[SSE Helper] Error reading SSE stream:', error);
+                  this.isConnected = false;
+                  result.disconnectedAt = new Date().toISOString();
+                  result.error = error instanceof Error ? error.message : 'Unknown error';
+                  this.connectionResult = result;
+                }
+              };
+
+              readChunk();
+            }
+
+            resolve(result);
+          })
+          .catch((error) => {
+            result.success = false;
+            result.error = error.message;
+            result.connectedAt = new Date().toISOString();
+            this.connectionResult = result;
+            resolve(result);
+          });
+      } catch (error) {
+        result.success = false;
+        result.error = error instanceof Error ? error.message : 'Unknown error';
+        this.connectionResult = result;
+        resolve(result);
+      }
+    });
+  }
+
+  private handleSSEEvent(eventType: string, data: Record<string, unknown>): void {
+    if (eventType === 'location' && typeof data.deviceId === 'string') {
+      this.receivedLocations.push({
+        deviceId: data.deviceId,
+        latitude: typeof data.latitude === 'number' ? data.latitude : 0,
+        longitude: typeof data.longitude === 'number' ? data.longitude : 0,
+        groupId: typeof data.groupId === 'string' ? data.groupId : undefined,
+        receivedAt: new Date().toISOString(),
+      });
+    } else if (eventType === 'ready' && typeof data.groupId === 'string') {
+      if (this.connectionResult) {
+        this.connectionResult.groupId = data.groupId;
+      }
+    }
   }
 
   /**
    * Disconnect from SSE stream
    */
   async disconnect(): Promise<void> {
-    await fetch(`${COORDINATOR_URL}/disconnect`, { method: 'POST' });
+    if (this.reader) {
+      try {
+        await this.reader.cancel();
+      } catch {
+        // Ignore cancel errors
+      }
+      this.reader = null;
+    }
+    this.isConnected = false;
+    this.currentApiKey = null;
+    if (this.connectionResult) {
+      this.connectionResult.disconnectedAt = new Date().toISOString();
+    }
   }
 
   /**
    * Reset test state
    */
   async reset(): Promise<void> {
-    await fetch(`${COORDINATOR_URL}/reset`, { method: 'POST' });
+    await this.disconnect();
+    this.receivedLocations = [];
+    this.expectedLocations = [];
+    this.testId = null;
+    this.connectionResult = null;
   }
 
   /**
    * Set expected locations
    */
-  async expectLocations(
-    testId: string,
-    expectedLocations: Array<{
-      deviceId: string;
-      latitude: number;
-      longitude: number;
-      groupId?: string;
-    }>
-  ): Promise<void> {
-    await fetch(`${COORDINATOR_URL}/expect`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ testId, expectedLocations }),
-    });
+  async expectLocations(testId: string, expectedLocations: ExpectedLocation[]): Promise<void> {
+    this.testId = testId;
+    this.expectedLocations = expectedLocations;
+    this.receivedLocations = []; // Clear previous received locations
   }
 
   /**
@@ -183,17 +239,44 @@ export class SSESubscriberHelper {
    */
   async validateLocations(timeout = 2000): Promise<{
     success: boolean;
-    results: Array<{ expected: unknown; received: unknown | null; matched: boolean }>;
+    results: Array<{
+      expected: ExpectedLocation;
+      received: ReceivedLocation | null;
+      matched: boolean;
+    }>;
     receivedCount: number;
     expectedCount: number;
   }> {
-    const response = await fetch(`${COORDINATOR_URL}/validate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ timeout }),
+    // Wait for locations to arrive
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeout) {
+      if (this.receivedLocations.length >= this.expectedLocations.length) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    const results = this.expectedLocations.map((expected) => {
+      const received = this.receivedLocations.find(
+        (r) =>
+          r.deviceId === expected.deviceId &&
+          Math.abs(r.latitude - expected.latitude) < 0.0001 &&
+          Math.abs(r.longitude - expected.longitude) < 0.0001
+      );
+
+      return {
+        expected,
+        received: received || null,
+        matched: received !== undefined,
+      };
     });
 
-    return response.json();
+    return {
+      success: results.every((r) => r.matched),
+      results,
+      receivedCount: this.receivedLocations.length,
+      expectedCount: this.expectedLocations.length,
+    };
   }
 
   /**
@@ -207,10 +290,18 @@ export class SSESubscriberHelper {
     groupId: string | null;
     currentApiKey: string | null;
     connectionResult: SubscriberConnectionResult | null;
-    receivedLocations: unknown[];
+    receivedLocations: ReceivedLocation[];
   }> {
-    const response = await fetch(`${COORDINATOR_URL}/state`);
-    return response.json();
+    return {
+      testId: this.testId,
+      expectedCount: this.expectedLocations.length,
+      receivedCount: this.receivedLocations.length,
+      ready: this.isConnected && this.reader !== null,
+      groupId: this.connectionResult?.groupId || null,
+      currentApiKey: this.currentApiKey,
+      connectionResult: this.connectionResult,
+      receivedLocations: this.receivedLocations,
+    };
   }
 
   /**
@@ -224,8 +315,14 @@ export class SSESubscriberHelper {
     currentApiKey: string | null;
     connectionResult: SubscriberConnectionResult | null;
   }> {
-    const response = await fetch(`${COORDINATOR_URL}/health`);
-    return response.json();
+    return {
+      status: this.isConnected ? 'connected' : 'disconnected',
+      connected: this.isConnected,
+      ready: this.isConnected && this.reader !== null,
+      groupId: this.connectionResult?.groupId || null,
+      currentApiKey: this.currentApiKey,
+      connectionResult: this.connectionResult,
+    };
   }
 }
 
@@ -235,9 +332,9 @@ let subscriberHelper: SSESubscriberHelper | null = null;
 /**
  * Get or create the SSE subscriber helper instance
  */
-export function getSSESubscriberHelper(): SSESubscriberHelper {
+export function getSSESubscriberHelper(serverBaseUrl?: string): SSESubscriberHelper {
   if (!subscriberHelper) {
-    subscriberHelper = new SSESubscriberHelper();
+    subscriberHelper = new SSESubscriberHelper(serverBaseUrl);
   }
   return subscriberHelper;
 }

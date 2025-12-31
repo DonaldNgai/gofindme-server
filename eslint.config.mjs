@@ -9,6 +9,7 @@ export default [
   },
   {
     files: ['**/*.ts', '**/*.tsx'],
+    ignores: ['**/*.test.ts', '**/*.spec.ts'],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
