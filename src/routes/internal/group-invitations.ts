@@ -2,7 +2,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import { prisma as db } from '../../db.js';
-import { requireAuth, getUserFromAuth0 } from '../../utils/auth.js';
+import { requireAuth } from '../../utils/auth.js';
+import { findOrCreateUser } from '../../utils/user-helpers.js';
 import { zodToJsonSchemaFastify } from '../../utils/zod-to-json-schema.js';
 
 const invitationResponse = z.object({
@@ -52,36 +53,7 @@ export async function registerGroupInvitationRoutes(app: FastifyInstance): Promi
       const userId = auth.sub;
 
       // Find or create user
-      let user = await db.users.findFirst({
-        where: {
-          OR: [{ email: auth.email as string }, { id: userId }],
-        },
-      });
-
-      if (!user) {
-        let userEmail = auth.email;
-        let userName = auth.name;
-
-        if (!userEmail) {
-          const auth0User = await getUserFromAuth0(userId);
-          if (auth0User) {
-            userEmail = auth0User.email;
-            userName = auth0User.name || userName;
-          }
-        }
-
-        if (!userEmail) {
-          userEmail = `${userId}@auth0.local`;
-        }
-
-        user = await db.users.create({
-          data: {
-            id: userId,
-            email: userEmail,
-            name: userName as string | undefined,
-          },
-        });
-      }
+      const user = await findOrCreateUser(userId, auth.email, auth.name);
 
       // Verify group exists and user is owner
       const group = await db.groups.findFirst({
@@ -176,22 +148,8 @@ export async function registerGroupInvitationRoutes(app: FastifyInstance): Promi
 
       const userId = auth.sub;
 
-      // Find user
-      let user = await db.users.findFirst({
-        where: {
-          OR: [{ email: auth.email as string }, { id: userId }],
-        },
-      });
-
-      if (!user) {
-        user = await db.users.create({
-          data: {
-            id: userId,
-            email: auth.email as string,
-            name: auth.name as string | undefined,
-          },
-        });
-      }
+      // Find or create user
+      const user = await findOrCreateUser(userId, auth.email, auth.name);
 
       // Verify group exists and user is owner
       const group = await db.groups.findFirst({
@@ -263,21 +221,7 @@ export async function registerGroupInvitationRoutes(app: FastifyInstance): Promi
       const userId = auth.sub;
 
       // Find or create user
-      let user = await db.users.findFirst({
-        where: {
-          OR: [{ email: auth.email as string }, { id: userId }],
-        },
-      });
-
-      if (!user) {
-        user = await db.users.create({
-          data: {
-            id: userId,
-            email: auth.email as string,
-            name: auth.name as string | undefined,
-          },
-        });
-      }
+      const user = await findOrCreateUser(userId, auth.email, auth.name);
 
       const where: { user_id: string; status?: string } = {
         user_id: user.id,
@@ -330,22 +274,8 @@ export async function registerGroupInvitationRoutes(app: FastifyInstance): Promi
 
       const userId = auth.sub;
 
-      // Find user
-      let user = await db.users.findFirst({
-        where: {
-          OR: [{ email: auth.email as string }, { id: userId }],
-        },
-      });
-
-      if (!user) {
-        user = await db.users.create({
-          data: {
-            id: userId,
-            email: auth.email as string,
-            name: auth.name as string | undefined,
-          },
-        });
-      }
+      // Find or create user
+      const user = await findOrCreateUser(userId, auth.email, auth.name);
 
       // Find invitation
       const invitation = await db.group_invitations.findUnique({
@@ -439,22 +369,8 @@ export async function registerGroupInvitationRoutes(app: FastifyInstance): Promi
 
       const userId = auth.sub;
 
-      // Find user
-      let user = await db.users.findFirst({
-        where: {
-          OR: [{ email: auth.email as string }, { id: userId }],
-        },
-      });
-
-      if (!user) {
-        user = await db.users.create({
-          data: {
-            id: userId,
-            email: auth.email as string,
-            name: auth.name as string | undefined,
-          },
-        });
-      }
+      // Find or create user
+      const user = await findOrCreateUser(userId, auth.email, auth.name);
 
       // Find invitation
       const invitation = await db.group_invitations.findUnique({

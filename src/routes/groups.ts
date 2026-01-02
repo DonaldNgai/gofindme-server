@@ -1,8 +1,8 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { z } from "zod";
-import { prisma as db } from "../db.js";
-import { requireAuth } from "../utils/auth.js";
-import { zodToJsonSchemaFastify } from "../utils/zod-to-json-schema.js";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { z } from 'zod';
+import { prisma as db } from '../db.js';
+import { requireAuth } from '../utils/auth.js';
+import { zodToJsonSchemaFastify } from '../utils/zod-to-json-schema.js';
 
 const groupResponse = z.object({
   id: z.string(),
@@ -14,11 +14,11 @@ const groupResponse = z.object({
 
 export async function registerGroupRoutes(app: FastifyInstance) {
   app.post(
-    "/groups",
+    '/groups',
     {
       schema: {
-        tags: ["Groups"],
-        summary: "Create a new location group",
+        tags: ['Groups'],
+        summary: 'Create a new location group',
         body: zodToJsonSchemaFastify(
           z.object({
             name: z.string().min(3),
@@ -31,10 +31,10 @@ export async function registerGroupRoutes(app: FastifyInstance) {
         },
       },
     },
-  async (request: FastifyRequest, reply: FastifyReply) => {
+    async (request: FastifyRequest, reply: FastifyReply) => {
       const auth = await requireAuth(request, reply);
       const body = request.body as { name: string; description?: string; apiBaseUrl?: string };
-      const ownerId = auth.sub ?? "anonymous";
+      const ownerId = auth.sub ?? 'anonymous';
 
       // Find or create user
       let user = await db.users.findUnique({ where: { email: auth.email as string } });
@@ -67,19 +67,19 @@ export async function registerGroupRoutes(app: FastifyInstance) {
   );
 
   app.get(
-    "/groups",
+    '/groups',
     {
       schema: {
-        tags: ["Groups"],
-        summary: "List groups you own",
+        tags: ['Groups'],
+        summary: 'List groups you own',
         response: {
           200: zodToJsonSchemaFastify(z.object({ items: z.array(groupResponse) })),
         },
       },
     },
-  async (request: FastifyRequest, reply: FastifyReply) => {
+    async (request: FastifyRequest, reply: FastifyReply) => {
       const auth = await requireAuth(request, reply);
-      const ownerId = auth.sub ?? "anonymous";
+      const ownerId = auth.sub ?? 'anonymous';
 
       // Find user by email or sub
       let user = await db.users.findFirst({
@@ -114,11 +114,11 @@ export async function registerGroupRoutes(app: FastifyInstance) {
   );
 
   app.post(
-    "/groups/:groupId/join",
+    '/groups/:groupId/join',
     {
       schema: {
-        tags: ["Groups"],
-        summary: "Submit a join request for a group",
+        tags: ['Groups'],
+        summary: 'Submit a join request for a group',
         params: zodToJsonSchemaFastify(z.object({ groupId: z.string().min(4) })),
         body: zodToJsonSchemaFastify(
           z.object({
@@ -128,12 +128,12 @@ export async function registerGroupRoutes(app: FastifyInstance) {
         ),
         response: {
           202: zodToJsonSchemaFastify(
-            z.object({ status: z.literal("pending"), memberId: z.string() })
+            z.object({ status: z.literal('pending'), memberId: z.string() })
           ),
         },
       },
     },
-  async (request: FastifyRequest, reply: FastifyReply) => {
+    async (request: FastifyRequest, reply: FastifyReply) => {
       const { groupId } = request.params as { groupId: string };
       const body = request.body as { email: string; reason?: string };
 
@@ -141,7 +141,7 @@ export async function registerGroupRoutes(app: FastifyInstance) {
       const group = await db.groups.findUnique({ where: { id: groupId } });
       if (!group) {
         reply.code(404);
-        throw new Error("Group not found");
+        throw new Error('Group not found');
       }
 
       // Find or create user
@@ -163,14 +163,14 @@ export async function registerGroupRoutes(app: FastifyInstance) {
         create: {
           group_id: groupId,
           user_id: user.id,
-          status: "pending",
+          status: 'pending',
         },
         update: {
-          status: "pending",
+          status: 'pending',
         },
       });
 
-      reply.code(202).send({ status: "pending", memberId: member.id });
+      reply.code(202).send({ status: 'pending', memberId: member.id });
     }
   );
 }

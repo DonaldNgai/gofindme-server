@@ -34,14 +34,14 @@ type DocumentedSchema = FastifySchema & {
 
 /**
  * Public routes for location tracking
- * 
+ *
  * Location submission flow:
  * 1. User submits location with Auth0 access token
  * 2. Token identifies the user (auth.sub = userId)
  * 3. Find all groups where user is a member AND have active API keys
  * 4. Publish location update to all those groups
  * 5. Only API keys assigned to those groups receive notifications
- * 
+ *
  * Stream subscription:
  * - Requires API key authentication (developer apps)
  * - Apps subscribe to their assigned group's events
@@ -55,7 +55,8 @@ export async function registerPublicLocationRoutes(app: FastifyInstance) {
       schema: {
         tags: ['Locations'],
         summary: 'Submit a device location update',
-        description: 'Endpoint for users to submit their location data. Requires Auth0 authentication.',
+        description:
+          'Endpoint for users to submit their location data. Requires Auth0 authentication.',
         body: zodToJsonSchemaFastify(locationPayload),
         response: { 202: zodToJsonSchemaFastify(ingestionResponse) },
         security: [{ bearerAuth: [] }],
@@ -99,7 +100,9 @@ export async function registerPublicLocationRoutes(app: FastifyInstance) {
 
       if (authorizedGroups.length === 0) {
         reply.code(403);
-        throw new Error('User is not a member of any groups with active API keys. Join a group with an active app before submitting location data.');
+        throw new Error(
+          'User is not a member of any groups with active API keys. Join a group with an active app before submitting location data.'
+        );
       }
 
       // Get user's first group for storage (we still need a group_id for the location record)
@@ -117,7 +120,9 @@ export async function registerPublicLocationRoutes(app: FastifyInstance) {
 
       if (!userGroupMembership) {
         reply.code(403);
-        throw new Error('User is not a member of any groups. Join a group before submitting location data.');
+        throw new Error(
+          'User is not a member of any groups. Join a group before submitting location data.'
+        );
       }
 
       const payload = {
@@ -183,7 +188,8 @@ export async function registerPublicLocationRoutes(app: FastifyInstance) {
       schema: {
         tags: ['Locations'],
         summary: 'Subscribe to live location events',
-        description: 'Public endpoint for streaming location updates. Requires API key authentication.',
+        description:
+          'Public endpoint for streaming location updates. Requires API key authentication.',
         security: [{ apiKey: [] }],
       } as DocumentedSchema,
     },
@@ -225,4 +231,3 @@ function openLocationStream(reply: FastifyReply, groupId: string) {
     res.end();
   });
 }
-

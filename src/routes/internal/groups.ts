@@ -1,7 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { prisma as db } from '../../db.js';
-import { requireAuth, getUserFromAuth0 } from '../../utils/auth.js';
+import { requireAuth } from '../../utils/auth.js';
+import { findOrCreateUser } from '../../utils/user-helpers.js';
 import { zodToJsonSchemaFastify } from '../../utils/zod-to-json-schema.js';
 
 const groupResponse = z.object({
@@ -18,7 +19,7 @@ const groupResponse = z.object({
  * These are only accessible to authenticated users via Auth0 (your Next.js frontend)
  * NOT exposed in the public npm package
  */
-export async function registerInternalGroupRoutes(app: FastifyInstance) {
+export async function registerInternalGroupRoutes(app: FastifyInstance): Promise<void> {
   // Create a new group
   app.post(
     '/groups',
@@ -49,39 +50,7 @@ export async function registerInternalGroupRoutes(app: FastifyInstance) {
       const userId = auth.sub;
 
       // Find or create user using the sub from token
-      let user = await db.users.findFirst({
-        where: {
-          OR: [{ email: auth.email as string }, { id: userId }],
-        },
-      });
-
-      if (!user) {
-        // If email is not in token, query Auth0 Management API to get user info
-        let userEmail = auth.email;
-        let userName = auth.name;
-
-        if (!userEmail) {
-          const auth0User = await getUserFromAuth0(userId);
-          if (auth0User) {
-            userEmail = auth0User.email;
-            userName = auth0User.name || userName;
-          }
-        }
-
-        // Fallback to generated email if still not available
-        if (!userEmail) {
-          userEmail = `${userId}@auth0.local`;
-        }
-
-        // Create user if doesn't exist, using sub from Auth0 token
-        user = await db.users.create({
-          data: {
-            id: userId, // Use Auth0 sub as the user ID
-            email: userEmail,
-            name: userName as string | undefined,
-          },
-        });
-      }
+      const user = await findOrCreateUser(userId, auth.email, auth.name);
 
       const record = await db.groups.create({
         data: {
@@ -125,21 +94,7 @@ export async function registerInternalGroupRoutes(app: FastifyInstance) {
       const userId = auth.sub;
 
       // Find or create user using the sub from token
-      let user = await db.users.findFirst({
-        where: {
-          OR: [{ email: auth.email as string }, { id: userId }],
-        },
-      });
-
-      if (!user) {
-        user = await db.users.create({
-          data: {
-            id: userId, // Use Auth0 sub as the user ID
-            email: auth.email as string,
-            name: auth.name as string | undefined,
-          },
-        });
-      }
+      const user = await findOrCreateUser(userId, auth.email, auth.name);
 
       const rows = await db.groups.findMany({
         where: { owner_id: user.id }, // Use the user ID (which is the Auth0 sub)
@@ -240,21 +195,7 @@ export async function registerInternalGroupRoutes(app: FastifyInstance) {
       const userId = auth.sub;
 
       // Find or create user using the sub from token
-      let user = await db.users.findFirst({
-        where: {
-          OR: [{ email: auth.email as string }, { id: userId }],
-        },
-      });
-
-      if (!user) {
-        user = await db.users.create({
-          data: {
-            id: userId, // Use Auth0 sub as the user ID
-            email: auth.email as string,
-            name: auth.name as string | undefined,
-          },
-        });
-      }
+      const user = await findOrCreateUser(userId, auth.email, auth.name);
 
       const group = await db.groups.findFirst({
         where: {
@@ -312,21 +253,7 @@ export async function registerInternalGroupRoutes(app: FastifyInstance) {
       const userId = auth.sub;
 
       // Find or create user using the sub from token
-      let user = await db.users.findFirst({
-        where: {
-          OR: [{ email: auth.email as string }, { id: userId }],
-        },
-      });
-
-      if (!user) {
-        user = await db.users.create({
-          data: {
-            id: userId, // Use Auth0 sub as the user ID
-            email: auth.email as string,
-            name: auth.name as string | undefined,
-          },
-        });
-      }
+      const user = await findOrCreateUser(userId, auth.email, auth.name);
 
       const group = await db.groups.findFirst({
         where: {
@@ -412,4 +339,3 @@ export async function registerInternalGroupRoutes(app: FastifyInstance) {
     }
   );
 }
-

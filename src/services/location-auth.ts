@@ -4,10 +4,10 @@ import { prisma as db } from '../db.js';
  * Find all groups that:
  * 1. The deviceId/user is a member of (via group_members)
  * 2. Have at least one active API key (app) assigned
- * 
+ *
  * This ensures location data is only sent to apps that are authorized
  * to receive location data for users in their assigned groups.
- * 
+ *
  * @param deviceId - The device identifier (may also be a userId)
  * @param contextUserId - Optional user ID from context (e.g., from API key that submitted the location)
  * @returns Array of group IDs that are authorized to receive this location update
@@ -19,11 +19,11 @@ export async function findAuthorizedGroups(
   // First, try to find if deviceId corresponds to a user ID
   // This handles the case where deviceId = userId
   let userId: string | null = null;
-  
+
   const user = await db.users.findUnique({
     where: { id: deviceId },
   });
-  
+
   if (user) {
     userId = user.id;
   } else if (contextUserId) {
@@ -80,18 +80,18 @@ export async function findAuthorizedGroups(
 
 /**
  * Find authorized groups for a user directly from their user ID
- * 
+ *
  * Used when the user is identified by Auth0 token (auth.sub = userId).
- * 
+ *
  * Flow:
  * 1. User submits location with Auth0 token
  * 2. Token identifies user (userId from auth.sub)
  * 3. Find all groups where user is a member
  * 4. Filter to groups that have active API keys (apps)
  * 5. Return those groups for notification
- * 
+ *
  * Only API keys assigned to these groups can receive location updates for this user.
- * 
+ *
  * @param userId - User ID (typically from Auth0 token's sub claim)
  * @returns Array of group IDs that are authorized to receive location updates for this user
  */

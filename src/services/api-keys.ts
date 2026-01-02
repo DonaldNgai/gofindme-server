@@ -1,11 +1,11 @@
-import crypto from "node:crypto";
-import { nanoid } from "nanoid";
-import { prisma as db } from "../db.js";
+import crypto from 'node:crypto';
+import { nanoid } from 'nanoid';
+import { prisma as db } from '../db.js';
 
-const KEY_PREFIX = "loc";
+const KEY_PREFIX = 'loc';
 
 function hashSecret(secret: string) {
-  return crypto.createHash("sha256").update(secret).digest("hex");
+  return crypto.createHash('sha256').update(secret).digest('hex');
 }
 
 export async function createApiKey(groupId: string, label: string, userId?: string) {
@@ -35,7 +35,7 @@ export async function revokeApiKey(keyId: string) {
 }
 
 export async function resolveApiKey(rawKey: string) {
-  const [prefix, tokenId] = rawKey.split("_", 2);
+  const [prefix, tokenId] = rawKey.split('_', 2);
   if (prefix !== KEY_PREFIX || !tokenId) return null;
 
   const record = await db.api_keys.findFirst({

@@ -58,7 +58,9 @@ async function getJwks() {
 /**
  * Decode JWT token without verification (for testing only)
  */
-function decodeTestToken(token: string): JWTPayload & { sub: string; email?: string; name?: string } {
+function decodeTestToken(
+  token: string
+): JWTPayload & { sub: string; email?: string; name?: string } {
   const parts = token.split('.');
   if (parts.length !== 3) {
     throw new Error('Invalid JWT format');
@@ -100,8 +102,8 @@ export async function requireAuth(
   // Test mode: if NODE_ENV is 'test' OR if AUTH0_DOMAIN is not set (common in tests), decode without verification
   // Vitest may not always set NODE_ENV=test, so we also check if AUTH0_DOMAIN is missing
   // Also check if we're running in a test environment (vitest sets process.env.VITEST)
-  const isTestMode = 
-    process.env.NODE_ENV === 'test' || 
+  const isTestMode =
+    process.env.NODE_ENV === 'test' ||
     process.env.VITEST === 'true' ||
     (!process.env.AUTH0_DOMAIN && !process.env.AUTH0_ISSUER_BASE_URL);
 
@@ -145,10 +147,14 @@ export async function requireAuth(
         reply.send({ error: 'Invalid token signature' });
       } else if (error.message.includes('audience') || error.name === 'JWTClaimValidationFailed') {
         reply.code(401);
-        reply.send({ error: 'Invalid token audience. Make sure the token was issued for the correct API.' });
+        reply.send({
+          error: 'Invalid token audience. Make sure the token was issued for the correct API.',
+        });
       } else if (error.message.includes('issuer') || error.name === 'JWTClaimValidationFailed') {
         reply.code(401);
-        reply.send({ error: 'Invalid token issuer. Token must be from the configured Auth0 domain.' });
+        reply.send({
+          error: 'Invalid token issuer. Token must be from the configured Auth0 domain.',
+        });
       } else if (error.name === 'JWKSNoMatchingKey') {
         // Clear JWKS cache and retry once
         jwks = null;
@@ -165,10 +171,11 @@ export async function requireAuth(
             throw new Error('Token missing sub claim');
           }
           return payload as JWTPayload & { sub: string; email?: string; name?: string };
-        } catch (retryError) {
+        } catch {
           reply.code(401);
           reply.send({
-            error: 'Token key not found in Auth0 JWKS. The token may be from a different Auth0 tenant or the key has been rotated.',
+            error:
+              'Token key not found in Auth0 JWKS. The token may be from a different Auth0 tenant or the key has been rotated.',
             hint: 'Try getting a new token from Auth0',
           });
         }
@@ -199,7 +206,9 @@ async function getM2MToken(): Promise<string> {
 
   const clientId = process.env.AUTH0_M2M_CLIENT_ID;
   const clientSecret = process.env.AUTH0_M2M_CLIENT_SECRET;
-  const domain = getAuth0Config().domain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const domain = getAuth0Config()
+    .domain.replace(/^https?:\/\//, '')
+    .replace(/\/$/, '');
 
   if (!clientId || !clientSecret) {
     throw new Error(
@@ -228,7 +237,7 @@ async function getM2MToken(): Promise<string> {
   }
 
   const data = (await response.json()) as { access_token: string; expires_in: number };
-  
+
   // Cache the token
   m2mTokenCache = {
     token: data.access_token,
@@ -242,10 +251,14 @@ async function getM2MToken(): Promise<string> {
  * Query Auth0 Management API to get user information by sub (user ID)
  * Returns user email and name if available
  */
-export async function getUserFromAuth0(sub: string): Promise<{ email?: string; name?: string } | null> {
+export async function getUserFromAuth0(
+  sub: string
+): Promise<{ email?: string; name?: string } | null> {
   try {
     const token = await getM2MToken();
-    const domain = getAuth0Config().domain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const domain = getAuth0Config()
+      .domain.replace(/^https?:\/\//, '')
+      .replace(/\/$/, '');
     const userId = encodeURIComponent(sub); // Auth0 user IDs may contain special characters
     const userUrl = `https://${domain}/api/v2/users/${userId}`;
 

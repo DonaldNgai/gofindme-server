@@ -19,7 +19,10 @@ export class WebhookService {
     return hmac.digest('hex');
   }
 
-  async deliver(webhook: WebhookConfig, payload: LocationUpdatePayload & { groupId: string }): Promise<void> {
+  async deliver(
+    webhook: WebhookConfig,
+    payload: LocationUpdatePayload & { groupId: string }
+  ): Promise<void> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'User-Agent': 'GoFindMe-Webhook/1.0',
@@ -56,4 +59,3 @@ export class WebhookService {
 }
 
 export const webhookService = new WebhookService();
-

@@ -1,9 +1,9 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { z } from "zod";
-import { prisma as db } from "../db.js";
-import { createApiKey } from "../services/api-keys.js";
-import { requireAuth } from "../utils/auth.js";
-import { zodToJsonSchemaFastify } from "../utils/zod-to-json-schema.js";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { z } from 'zod';
+import { prisma as db } from '../db.js';
+import { createApiKey } from '../services/api-keys.js';
+import { requireAuth } from '../utils/auth.js';
+import { zodToJsonSchemaFastify } from '../utils/zod-to-json-schema.js';
 
 const apiKeyResponse = z.object({
   id: z.string(),
@@ -14,11 +14,11 @@ const apiKeyResponse = z.object({
 
 export async function registerApiKeyRoutes(app: FastifyInstance) {
   app.post(
-    "/groups/:groupId/api-keys",
+    '/groups/:groupId/api-keys',
     {
       schema: {
-        tags: ["API Keys"],
-        summary: "Issue a new API key",
+        tags: ['API Keys'],
+        summary: 'Issue a new API key',
         params: zodToJsonSchemaFastify(z.object({ groupId: z.string().min(4) })),
         body: zodToJsonSchemaFastify(z.object({ label: z.string().min(3) })),
         response: {
@@ -50,13 +50,13 @@ export async function registerApiKeyRoutes(app: FastifyInstance) {
       const group = await db.groups.findFirst({
         where: {
           id: groupId,
-          owner_id: user?.id ?? auth.sub ?? "anonymous",
+          owner_id: user?.id ?? auth.sub ?? 'anonymous',
         },
       });
 
       if (!group) {
         reply.code(404);
-        throw new Error("Group not found");
+        throw new Error('Group not found');
       }
 
       const apiKey = await createApiKey(group.id, body.label, user?.id);
@@ -65,11 +65,11 @@ export async function registerApiKeyRoutes(app: FastifyInstance) {
   );
 
   app.get(
-    "/groups/:groupId/api-keys",
+    '/groups/:groupId/api-keys',
     {
       schema: {
-        tags: ["API Keys"],
-        summary: "List API keys",
+        tags: ['API Keys'],
+        summary: 'List API keys',
         params: zodToJsonSchemaFastify(z.object({ groupId: z.string().min(4) })),
         response: {
           200: zodToJsonSchemaFastify(z.object({ items: z.array(apiKeyResponse) })),
@@ -99,13 +99,13 @@ export async function registerApiKeyRoutes(app: FastifyInstance) {
       const group = await db.groups.findFirst({
         where: {
           id: groupId,
-          owner_id: user?.id ?? auth.sub ?? "anonymous",
+          owner_id: user?.id ?? auth.sub ?? 'anonymous',
         },
       });
 
       if (!group) {
         reply.code(404);
-        throw new Error("Group not found");
+        throw new Error('Group not found');
       }
 
       const rows = await db.api_keys.findMany({

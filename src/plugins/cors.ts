@@ -8,4 +8,3 @@ export async function registerCors(fastify: FastifyInstance) {
     credentials: true,
   });
 }
-

@@ -13,7 +13,8 @@ export async function registerReadmeRoutes(app: FastifyInstance) {
       schema: {
         tags: ['Readme'],
         summary: 'Get OpenAPI specification',
-        description: 'Returns the OpenAPI 3.0 specification in JSON format. Used by Readme.com and other API documentation tools.',
+        description:
+          'Returns the OpenAPI 3.0 specification in JSON format. Used by Readme.com and other API documentation tools.',
         response: {
           200: {
             type: 'object',
@@ -23,6 +24,8 @@ export async function registerReadmeRoutes(app: FastifyInstance) {
       },
     },
     async (_request, reply) => {
+      // Access swagger method added by @fastify/swagger plugin
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const spec = (app as any).swagger();
       reply.type('application/json').send(spec);
     }
@@ -72,6 +75,8 @@ export async function registerReadmeRoutes(app: FastifyInstance) {
       }
 
       // Return the OpenAPI spec for Readme.com to consume
+      // Access swagger method added by @fastify/swagger plugin
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const spec = (app as any).swagger();
       reply.type('application/json').send(spec);
     }

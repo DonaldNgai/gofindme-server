@@ -2,7 +2,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { prisma as db } from '../../db.js';
 import { createApiKey } from '../../services/api-keys.js';
-import { requireAuth, getUserFromAuth0 } from '../../utils/auth.js';
+import { requireAuth } from '../../utils/auth.js';
+import { findOrCreateUser } from '../../utils/user-helpers.js';
 import { zodToJsonSchemaFastify } from '../../utils/zod-to-json-schema.js';
 
 const apiKeyResponse = z.object({
@@ -17,7 +18,7 @@ const apiKeyResponse = z.object({
  * These are only accessible to authenticated users via Auth0 (your Next.js frontend)
  * NOT exposed in the public npm package
  */
-export async function registerInternalApiKeyRoutes(app: FastifyInstance) {
+export async function registerInternalApiKeyRoutes(app: FastifyInstance): Promise<void> {
   // Create API key for a group
   app.post(
     '/api-keys',
@@ -47,39 +48,7 @@ export async function registerInternalApiKeyRoutes(app: FastifyInstance) {
       const userId = auth.sub;
 
       // Find or create user in database using the sub from token
-      let user = await db.users.findFirst({
-        where: {
-          OR: [{ email: auth.email as string }, { id: userId }],
-        },
-      });
-
-      if (!user) {
-        // If email is not in token, query Auth0 Management API to get user info
-        let userEmail = auth.email;
-        let userName = auth.name;
-
-        if (!userEmail) {
-          const auth0User = await getUserFromAuth0(userId);
-          if (auth0User) {
-            userEmail = auth0User.email;
-            userName = auth0User.name || userName;
-          }
-        }
-
-        // Fallback to generated email if still not available
-        if (!userEmail) {
-          userEmail = `${userId}@auth0.local`;
-        }
-
-        // Create user if doesn't exist, using sub from Auth0 token
-        user = await db.users.create({
-          data: {
-            id: userId, // Use Auth0 sub as the user ID
-            email: userEmail,
-            name: userName as string | undefined,
-          },
-        });
-      }
+      const user = await findOrCreateUser(userId, auth.email, auth.name);
 
       // Upsert group - create if it doesn't exist, otherwise verify ownership
       let group = await db.groups.findFirst({
@@ -97,7 +66,9 @@ export async function registerInternalApiKeyRoutes(app: FastifyInstance) {
 
         if (existingGroup) {
           reply.code(403);
-          throw new Error('Group exists but you do not have permission to create API keys for this group');
+          throw new Error(
+            'Group exists but you do not have permission to create API keys for this group'
+          );
         }
 
         // Create the group if it doesn't exist
@@ -144,38 +115,7 @@ export async function registerInternalApiKeyRoutes(app: FastifyInstance) {
       const userId = auth.sub;
 
       // Find or create user using the sub from token
-      let user = await db.users.findFirst({
-        where: {
-          OR: [{ email: auth.email as string }, { id: userId }],
-        },
-      });
-
-      if (!user) {
-        // If email is not in token, query Auth0 Management API to get user info
-        let userEmail = auth.email;
-        let userName = auth.name;
-
-        if (!userEmail) {
-          const auth0User = await getUserFromAuth0(userId);
-          if (auth0User) {
-            userEmail = auth0User.email;
-            userName = auth0User.name || userName;
-          }
-        }
-
-        // Fallback to generated email if still not available
-        if (!userEmail) {
-          userEmail = `${userId}@auth0.local`;
-        }
-
-        user = await db.users.create({
-          data: {
-            id: userId, // Use Auth0 sub as the user ID
-            email: userEmail,
-            name: userName as string | undefined,
-          },
-        });
-      }
+      const user = await findOrCreateUser(userId, auth.email, auth.name);
 
       const where: { group_id?: string; revoked_at: null } = { revoked_at: null };
       if (groupId) {
@@ -214,12 +154,14 @@ export async function registerInternalApiKeyRoutes(app: FastifyInstance) {
         });
 
         reply.send({
-          items: rows.map((row: { id: string; label: string; created_at: Date; last_used_at: Date | null }) => ({
-            id: row.id,
-            label: row.label,
-            createdAt: row.created_at.toISOString(),
-            lastUsedAt: row.last_used_at?.toISOString() ?? null,
-          })),
+          items: rows.map(
+            (row: { id: string; label: string; created_at: Date; last_used_at: Date | null }) => ({
+              id: row.id,
+              label: row.label,
+              createdAt: row.created_at.toISOString(),
+              lastUsedAt: row.last_used_at?.toISOString() ?? null,
+            })
+          ),
         });
         return;
       }
@@ -227,12 +169,14 @@ export async function registerInternalApiKeyRoutes(app: FastifyInstance) {
       const rows = await db.api_keys.findMany({ where });
 
       reply.send({
-        items: rows.map((row: { id: string; label: string; created_at: Date; last_used_at: Date | null }) => ({
-          id: row.id,
-          label: row.label,
-          createdAt: row.created_at.toISOString(),
-          lastUsedAt: row.last_used_at?.toISOString() ?? null,
-        })),
+        items: rows.map(
+          (row: { id: string; label: string; created_at: Date; last_used_at: Date | null }) => ({
+            id: row.id,
+            label: row.label,
+            createdAt: row.created_at.toISOString(),
+            lastUsedAt: row.last_used_at?.toISOString() ?? null,
+          })
+        ),
       });
     }
   );
@@ -264,38 +208,7 @@ export async function registerInternalApiKeyRoutes(app: FastifyInstance) {
         const userId = auth.sub;
 
         // Find or create user using the sub from token
-        let user = await db.users.findFirst({
-          where: {
-            OR: [{ email: auth.email as string }, { id: userId }],
-          },
-        });
-
-        if (!user) {
-          // If email is not in token, query Auth0 Management API to get user info
-          let userEmail = auth.email;
-          let userName = auth.name;
-
-          if (!userEmail) {
-            const auth0User = await getUserFromAuth0(userId);
-            if (auth0User) {
-              userEmail = auth0User.email;
-              userName = auth0User.name || userName;
-            }
-          }
-
-          // Fallback to generated email if still not available
-          if (!userEmail) {
-            userEmail = `${userId}@auth0.local`;
-          }
-
-          user = await db.users.create({
-            data: {
-              id: userId, // Use Auth0 sub as the user ID
-              email: userEmail,
-              name: userName as string | undefined,
-            },
-          });
-        }
+        const user = await findOrCreateUser(userId, auth.email, auth.name);
 
         // Find API key and verify ownership
         const apiKey = await db.api_keys.findFirst({
@@ -326,13 +239,19 @@ export async function registerInternalApiKeyRoutes(app: FastifyInstance) {
 
         // Check if already revoked (if using soft delete) or deleted
         if (apiKey.revoked_at) {
-          request.log.info({ keyId, revokedAt: apiKey.revoked_at }, 'API key already revoked, deleting from database');
+          request.log.info(
+            { keyId, revokedAt: apiKey.revoked_at },
+            'API key already revoked, deleting from database'
+          );
           // If already revoked, just delete it
           await db.api_keys.delete({
             where: { id: keyId },
           });
           request.log.info({ keyId }, 'API key deleted from database');
-          return reply.send({ success: true, message: 'API key was already revoked and has been deleted' });
+          return reply.send({
+            success: true,
+            message: 'API key was already revoked and has been deleted',
+          });
         }
 
         // Hard delete: Actually remove the key from the database
@@ -343,11 +262,12 @@ export async function registerInternalApiKeyRoutes(app: FastifyInstance) {
         request.log.info({ keyId }, 'API key deleted from database');
 
         reply.send({ success: true });
-      } catch (error: any) {
-        request.log.error({ error: error.message, stack: error.stack }, 'Error revoking API key');
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorStack = error instanceof Error ? error.stack : undefined;
+        request.log.error({ error: errorMessage, stack: errorStack }, 'Error revoking API key');
         throw error;
       }
     }
   );
 }
-

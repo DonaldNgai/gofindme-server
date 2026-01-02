@@ -18,9 +18,7 @@ export async function registerSwagger(fastify: FastifyInstance) {
           description: 'Development server',
         },
       ],
-      tags: [
-        { name: 'health', description: 'Health check endpoints' },
-      ],
+      tags: [{ name: 'health', description: 'Health check endpoints' }],
     },
   });
 
@@ -34,4 +32,3 @@ export async function registerSwagger(fastify: FastifyInstance) {
     transformStaticCSP: (header) => header,
   });
 }
-

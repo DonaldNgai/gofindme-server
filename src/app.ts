@@ -14,7 +14,7 @@ export async function buildApp(fastify: FastifyInstance) {
   // Register plugins
   await registerHelmet(fastify);
   await registerCors(fastify);
-  
+
   // Register rate limiting
   await fastify.register(rateLimit, {
     max: env.RATE_LIMIT_MAX ?? 300,
@@ -130,4 +130,3 @@ export async function buildApp(fastify: FastifyInstance) {
 
   return fastify;
 }
-
