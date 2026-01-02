@@ -15,18 +15,16 @@ export async function findOrCreateUser(
   authEmail?: string,
   authName?: string
 ): Promise<{ id: string; email: string; name: string | null }> {
-  // Try to find existing user
-  let user = await db.users.findFirst({
-    where: {
-      OR: authEmail ? [{ email: authEmail }, { id: userId }] : [{ id: userId }],
-    },
+  // Try to find existing user first (by ID, which is the primary identifier)
+  let user = await db.users.findUnique({
+    where: { id: userId },
   });
 
   if (user) {
     return user;
   }
 
-  // User doesn't exist, need to create
+  // User doesn't exist, need to determine email and name for creation
   let userEmail = authEmail;
   let userName = authName;
 
@@ -44,9 +42,12 @@ export async function findOrCreateUser(
     userEmail = `${userId}@auth0.local`;
   }
 
-  // Create user
-  user = await db.users.create({
-    data: {
+  // Use upsert to atomically create or get existing user
+  // This handles race conditions where multiple requests try to create the same user
+  user = await db.users.upsert({
+    where: { id: userId },
+    update: {}, // If user exists, don't update anything
+    create: {
       id: userId, // Use Auth0 sub as the user ID
       email: userEmail,
       name: userName as string | undefined,
