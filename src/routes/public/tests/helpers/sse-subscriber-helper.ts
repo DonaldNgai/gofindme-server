@@ -85,6 +85,9 @@ export class SSESubscriberHelper {
         // Note: EventSource doesn't support custom headers, so we need to use fetch + manual parsing
         const url = `${this.serverBaseUrl}/api/v1/stream`;
 
+        console.log(`[SSE Helper] Connecting to: ${url}`);
+        console.log(`[SSE Helper] Using API key: ${apiKey.substring(0, 20)}...`);
+
         fetch(url, {
           headers: {
             'X-API-Key': apiKey,
@@ -164,6 +167,8 @@ export class SSESubscriberHelper {
             resolve(result);
           })
           .catch((error) => {
+            console.error(`[SSE Helper] Fetch error:`, error.message);
+            console.error(`[SSE Helper] Error stack:`, error.stack);
             result.success = false;
             result.error = error.message;
             result.connectedAt = new Date().toISOString();

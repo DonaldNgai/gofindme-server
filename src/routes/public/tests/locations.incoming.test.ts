@@ -40,6 +40,10 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
     fastify = Fastify();
     await buildApp(fastify);
     await fastify.ready();
+
+    // Start the server so SSE subscribers can connect via HTTP
+    // Use a random port to avoid conflicts
+    await fastify.listen({ port: 0, host: '127.0.0.1' });
   });
 
   afterAll(async () => {
@@ -175,6 +179,17 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
     testApiKey3 = await generateFakeApiKey(testGroup3Id, 'App 3 API Key', testUserId2);
 
     console.log(`[Test] Generated API keys for groups`);
+    console.log(`[Test] API Key 1 (Group 1): ${testApiKey1.substring(0, 20)}...`);
+    console.log(`[Test] API Key 2 (Group 2): ${testApiKey2.substring(0, 20)}...`);
+
+    // Verify API keys exist in database
+    const apiKey1Record = await db.api_keys.findFirst({
+      where: { group_id: testGroup1Id, revoked_at: null },
+    });
+    if (!apiKey1Record) {
+      throw new Error(`API key for group ${testGroup1Id} was not created`);
+    }
+    console.log(`[Test] Verified API key 1 exists in database (ID: ${apiKey1Record.id})`);
 
     // Add user1 as member of group1 and group2 (accepted status)
     await db.group_members.upsert({
@@ -298,14 +313,17 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
           group_id: { in: groupIds },
         },
       });
-      await db.api_keys.deleteMany({
-        where: {
-          group_id: { in: groupIds },
-        },
-      });
-      await db.groups.deleteMany({
-        where: { id: { in: groupIds } },
-      });
+      // Don't delete API keys in afterEach - they're needed for multiple tests
+      // They'll be cleaned up in the final afterAll or when groups are deleted
+      // await db.api_keys.deleteMany({
+      //   where: {
+      //     group_id: { in: groupIds },
+      //   },
+      // });
+      // Don't delete groups in afterEach either - they're needed for SSE tests
+      // await db.groups.deleteMany({
+      //   where: { id: { in: groupIds } },
+      // });
     }
 
     if (userIds.length > 0) {
@@ -629,6 +647,9 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
     // Initialize subscriber before all tests in this describe block
     beforeAll(async () => {
       try {
+        // Wait a bit to ensure server is fully listening
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
         // Get server URL from fastify instance
         const serverAddress = fastify.server.address();
         let serverUrl = 'http://localhost:3000';
@@ -637,16 +658,21 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
           const host = serverAddress.address === '::' ? 'localhost' : serverAddress.address;
           const port = serverAddress.port;
           serverUrl = `http://${host}:${port}`;
+        } else if (!serverAddress) {
+          throw new Error('Server is not listening - address is null');
         }
 
         console.log('[Test] Initializing SSE subscriber for integration tests...');
+        console.log('[Test] Server address:', serverAddress);
         console.log('[Test] Server URL:', serverUrl);
+
         subscriber = getSSESubscriberHelper(serverUrl);
         await subscriber!.start();
         subscriberStarted = true;
         console.log('[Test] SSE subscriber initialized successfully');
       } catch (error: any) {
         console.error('[Test] Failed to initialize SSE subscriber:', error.message);
+        console.error('[Test] Stack:', error.stack);
         console.error('[Test] Tests in this section will be skipped.');
         subscriberStarted = false;
       }
@@ -663,6 +689,8 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
           console.error('[Test] Error stopping subscriber:', error.message);
         }
       }
+      // Don't clean up API keys/groups here - let the top-level afterAll handle it
+      // to avoid interfering with other tests
     });
 
     describe('API Key Validation', () => {
@@ -729,11 +757,58 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
         // Reset state
         await subscriber!.reset();
 
-        // Connect with valid API key
-        console.log(`[Test] Connecting with API key: ${testApiKey1.substring(0, 12)}...`);
+        // Verify API key exists in database
+        const apiKeyRecord = await db.api_keys.findFirst({
+          where: { group_id: testGroup1Id, revoked_at: null },
+        });
+        if (!apiKeyRecord) {
+          throw new Error(`API key not found for group ${testGroup1Id}`);
+        }
+        console.log(
+          `[Test] API key record found: ID=${apiKeyRecord.id}, Group=${apiKeyRecord.group_id}`
+        );
+
+        // Test API key resolution - if it fails, the variable might be stale
+        // but we'll let the connection test catch the real issue
+        const { resolveApiKey } = await import('../../../services/api-keys.js');
+        const resolvedKey = await resolveApiKey(testApiKey1);
+        if (resolvedKey) {
+          console.log(
+            `[Test] API key resolution test passed: resolved to group ${resolvedKey.group_id}`
+          );
+        } else {
+          console.warn(
+            `[Test] API key resolution failed - variable may be stale, but will try connection anyway`
+          );
+          console.warn(
+            `[Test] Expected tokenId from key: ${testApiKey1.split('_')[1]}, DB record ID: ${apiKeyRecord.id}`
+          );
+        }
+
+        // Get server URL
+        const serverAddress = fastify.server.address();
+        let serverUrl = 'http://localhost:3000';
+        if (serverAddress && typeof serverAddress === 'object') {
+          const host = serverAddress.address === '::' ? 'localhost' : serverAddress.address;
+          const port = serverAddress.port;
+          serverUrl = `http://${host}:${port}`;
+        }
+        console.log(`[Test] Connecting to: ${serverUrl}/api/v1/stream`);
+        console.log(`[Test] Using API key: ${testApiKey1.substring(0, 20)}...`);
+        console.log(
+          `[Test] Full API key format: ${testApiKey1.split('_').slice(0, 2).join('_')}_...`
+        );
+
         const result = await subscriber!.connect(testApiKey1);
 
         console.log('[Test] Connection result:', JSON.stringify(result, null, 2));
+
+        if (!result.success) {
+          console.error('[Test] Connection failed!');
+          console.error('[Test] Status:', result.statusCode);
+          console.error('[Test] Error:', result.error);
+          throw new Error(`Failed to connect to SSE stream: ${result.error || 'Unknown error'}`);
+        }
 
         expect(result.success).toBe(true);
         expect(result.statusCode).toBe(200);
@@ -767,7 +842,41 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
 
         // Reset and connect with valid API key
         await subscriber!.reset();
+
+        // Verify API key exists in database
+        const apiKeyRecord2 = await db.api_keys.findFirst({
+          where: { group_id: testGroup1Id, revoked_at: null },
+        });
+        if (!apiKeyRecord2) {
+          throw new Error(`API key not found for group ${testGroup1Id}`);
+        }
+        console.log(
+          `[Test] API key record found: ID=${apiKeyRecord2.id}, Group=${apiKeyRecord2.group_id}`
+        );
+
+        // Get server URL
+        const serverAddress = fastify.server.address();
+        let serverUrl = 'http://localhost:3000';
+        if (serverAddress && typeof serverAddress === 'object') {
+          const host = serverAddress.address === '::' ? 'localhost' : serverAddress.address;
+          const port = serverAddress.port;
+          serverUrl = `http://${host}:${port}`;
+        }
+        console.log(`[Test] Connecting to: ${serverUrl}/api/v1/stream`);
+        console.log(`[Test] Using API key: ${testApiKey1.substring(0, 20)}...`);
+
         const connectResult = await subscriber!.connect(testApiKey1);
+
+        console.log('[Test] Connection result:', JSON.stringify(connectResult, null, 2));
+
+        if (!connectResult.success) {
+          console.error('[Test] Connection failed!');
+          console.error('[Test] Status:', connectResult.statusCode);
+          console.error('[Test] Error:', connectResult.error);
+          throw new Error(
+            `Failed to connect to SSE stream: ${connectResult.error || 'Unknown error'}`
+          );
+        }
 
         expect(connectResult.success).toBe(true);
         console.log('[Test] Connected to SSE stream');
@@ -857,7 +966,41 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
 
         // Reset and connect with valid API key
         await subscriber!.reset();
+
+        // Verify API key exists in database
+        const apiKeyRecord3 = await db.api_keys.findFirst({
+          where: { group_id: testGroup1Id, revoked_at: null },
+        });
+        if (!apiKeyRecord3) {
+          throw new Error(`API key not found for group ${testGroup1Id}`);
+        }
+        console.log(
+          `[Test] API key record found: ID=${apiKeyRecord3.id}, Group=${apiKeyRecord3.group_id}`
+        );
+
+        // Get server URL
+        const serverAddress = fastify.server.address();
+        let serverUrl = 'http://localhost:3000';
+        if (serverAddress && typeof serverAddress === 'object') {
+          const host = serverAddress.address === '::' ? 'localhost' : serverAddress.address;
+          const port = serverAddress.port;
+          serverUrl = `http://${host}:${port}`;
+        }
+        console.log(`[Test] Connecting to: ${serverUrl}/api/v1/stream`);
+        console.log(`[Test] Using API key: ${testApiKey1.substring(0, 20)}...`);
+
         const connectResult = await subscriber!.connect(testApiKey1);
+
+        console.log('[Test] Connection result:', JSON.stringify(connectResult, null, 2));
+
+        if (!connectResult.success) {
+          console.error('[Test] Connection failed!');
+          console.error('[Test] Status:', connectResult.statusCode);
+          console.error('[Test] Error:', connectResult.error);
+          throw new Error(
+            `Failed to connect to SSE stream: ${connectResult.error || 'Unknown error'}`
+          );
+        }
 
         expect(connectResult.success).toBe(true);
         console.log('[Test] Connected to SSE stream');
