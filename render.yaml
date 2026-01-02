@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: gofindme-server
+    env: node
+    buildCommand: pnpm install --frozen-lockfile && pnpm db:generate && pnpm build
+    startCommand: node dist/server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: HOST
+        value: 0.0.0.0
+      # Add your other environment variables in the Render dashboard
+      # DATABASE_URL, AUTH0_DOMAIN, AUTH0_AUDIENCE, etc.

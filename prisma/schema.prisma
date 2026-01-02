@@ -37,16 +37,19 @@ model group_members {
 }
 
 model groups {
-  id            String          @id @default(cuid())
-  name          String
-  description   String?
-  owner_id      String
-  api_base_url  String?
-  created_at    DateTime        @default(now())
-  updated_at    DateTime        @updatedAt
-  api_keys      api_keys[]
-  group_members group_members[]
-  locations     locations[]
+  id                String              @id @default(cuid())
+  name              String
+  description       String?
+  owner_id          String
+  api_base_url      String?
+  created_at        DateTime            @default(now())
+  updated_at        DateTime            @updatedAt
+  api_keys          api_keys[]
+  group_invitations group_invitations[]
+  group_members     group_members[]
+  location_shares   location_shares[]
+  locations         locations[]
+
   @@map("groups")
 }
 
@@ -72,12 +75,55 @@ model locations {
 }
 
 model users {
-  id            String          @id @default(cuid())
-  email         String          @unique
-  name          String?
-  created_at    DateTime        @default(now())
-  updated_at    DateTime        @updatedAt
-  api_keys      api_keys[]
-  group_members group_members[]
+  id                String              @id @default(cuid())
+  email             String              @unique
+  name              String?
+  created_at        DateTime            @default(now())
+  updated_at        DateTime            @updatedAt
+  api_keys          api_keys[]
+  group_invitations group_invitations[]
+  group_members     group_members[]
+  location_shares   location_shares[]
+
   @@map("users")
+}
+
+model group_invitations {
+  id          String    @id
+  group_id    String
+  user_id     String
+  invited_by  String
+  status      String    @default("pending")
+  expires_at  DateTime?
+  created_at  DateTime  @default(now())
+  updated_at  DateTime
+  accepted_at DateTime?
+  rejected_at DateTime?
+  groups      groups    @relation(fields: [group_id], references: [id], onDelete: Cascade)
+  users       users     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([group_id, user_id])
+  @@index([expires_at])
+  @@index([group_id])
+  @@index([status])
+  @@index([user_id])
+}
+
+model location_shares {
+  id         String    @id
+  user_id    String
+  group_id   String
+  device_id  String?
+  started_at DateTime  @default(now())
+  ended_at   DateTime?
+  is_active  Boolean   @default(true)
+  created_at DateTime  @default(now())
+  updated_at DateTime
+  groups     groups    @relation(fields: [group_id], references: [id], onDelete: Cascade)
+  users      users     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([group_id])
+  @@index([is_active])
+  @@index([started_at])
+  @@index([user_id])
 }

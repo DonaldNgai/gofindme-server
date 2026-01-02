@@ -4,6 +4,9 @@
  * This helper allows tests to pause and wait for user input, which is useful
  * for integration tests that require manual interaction (e.g., testing with
  * real phone apps or developer apps).
+ *
+ * For better compatibility with Vitest, use the browser-based helpers from
+ * browser-input-helper.ts which open a browser window for input.
  */
 
 import * as readline from 'node:readline';
