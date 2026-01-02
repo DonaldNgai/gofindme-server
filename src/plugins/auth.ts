@@ -1,4 +1,4 @@
-import { FastifyInstance, FastifyPluginOptions } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { requireAuth } from '../utils/auth.js';
 
 declare module 'fastify' {
@@ -7,17 +7,14 @@ declare module 'fastify' {
   }
 }
 
-export async function authPlugin(
-  fastify: FastifyInstance,
-  _options: FastifyPluginOptions
-): Promise<void> {
+export async function authPlugin(fastify: FastifyInstance): Promise<void> {
   // Add a decorator to easily access authenticated user
-  fastify.decorateRequest('user', null);
+  fastify.decorateRequest('user', {
+    getter() {
+      return undefined;
+    },
+  });
 
   // Optional: Add a helper method to get user
-  fastify.addHook('onRequest', async (request, reply) => {
-    // This hook runs before route handlers
-    // The actual auth check is done in requireAuth() which is called in routes
-  });
+  // The actual auth check is done in requireAuth() which is called in routes
 }
-
