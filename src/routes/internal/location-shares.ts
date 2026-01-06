@@ -11,6 +11,8 @@ const locationShareResponse = z.object({
   userId: z.string(),
   groupId: z.string(),
   deviceId: z.string().nullable(),
+  frequency: z.number().nullable(),
+  duration: z.number().nullable(),
   startedAt: z.string(),
   endedAt: z.string().nullable(),
   isActive: z.boolean(),
@@ -35,6 +37,8 @@ export async function registerLocationShareRoutes(app: FastifyInstance): Promise
           z.object({
             groupId: z.string().min(4),
             deviceId: z.string().optional(),
+            frequency: z.number().int().min(5).max(300).optional(), // Update frequency in seconds (5s to 5min)
+            duration: z.number().int().positive().optional(), // Share duration in seconds (optional)
           })
         ),
         response: {
@@ -45,7 +49,12 @@ export async function registerLocationShareRoutes(app: FastifyInstance): Promise
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const auth = await requireAuth(request, reply);
-      const body = request.body as { groupId: string; deviceId?: string };
+      const body = request.body as {
+        groupId: string;
+        deviceId?: string;
+        frequency?: number;
+        duration?: number;
+      };
 
       const userId = auth.sub;
 
@@ -98,6 +107,8 @@ export async function registerLocationShareRoutes(app: FastifyInstance): Promise
           user_id: user.id,
           group_id: body.groupId,
           device_id: body.deviceId,
+          frequency: body.frequency ?? null,
+          duration: body.duration ?? null,
           is_active: true,
           updated_at: new Date(),
         },
@@ -108,6 +119,8 @@ export async function registerLocationShareRoutes(app: FastifyInstance): Promise
         userId: share.user_id,
         groupId: share.group_id,
         deviceId: share.device_id ?? null,
+        frequency: share.frequency,
+        duration: share.duration,
         startedAt: share.started_at.toISOString(),
         endedAt: share.ended_at?.toISOString() ?? null,
         isActive: share.is_active,
@@ -194,6 +207,8 @@ export async function registerLocationShareRoutes(app: FastifyInstance): Promise
           userId: share.user_id,
           groupId: share.group_id,
           deviceId: share.device_id ?? null,
+          frequency: share.frequency,
+        duration: share.duration,
           startedAt: share.started_at.toISOString(),
           endedAt: share.ended_at?.toISOString() ?? null,
           isActive: share.is_active,
@@ -257,6 +272,8 @@ export async function registerLocationShareRoutes(app: FastifyInstance): Promise
           userId: share.user_id,
           groupId: share.group_id,
           deviceId: share.device_id ?? null,
+          frequency: share.frequency,
+        duration: share.duration,
           startedAt: share.started_at.toISOString(),
           endedAt: share.ended_at?.toISOString() ?? null,
           isActive: share.is_active,
@@ -322,6 +339,7 @@ export async function registerLocationShareRoutes(app: FastifyInstance): Promise
         userId: updated.user_id,
         groupId: updated.group_id,
         deviceId: updated.device_id ?? null,
+        updateFrequencySeconds: updated.update_frequency_seconds,
         startedAt: updated.started_at.toISOString(),
         endedAt: updated.ended_at?.toISOString() ?? null,
         isActive: updated.is_active,

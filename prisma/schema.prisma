@@ -119,6 +119,8 @@ model location_shares {
   is_active  Boolean   @default(true)
   created_at DateTime  @default(now())
   updated_at DateTime
+  duration   Int?
+  frequency  Int?
   groups     groups    @relation(fields: [group_id], references: [id], onDelete: Cascade)
   users      users     @relation(fields: [user_id], references: [id], onDelete: Cascade)
 

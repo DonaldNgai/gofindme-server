@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import { prisma as db } from '../../db.js';
 import { locationBus } from '../../services/bus.js';
+import { locationBatcher } from '../../services/location-batcher.js';
 import { findAuthorizedGroupsForUser } from '../../services/location-auth.js';
 import { requireApiKey } from '../../utils/api-key.js';
 import { requireAuth } from '../../utils/auth.js';
@@ -18,6 +19,7 @@ const locationPayload = z.object({
   recordedAt: z.coerce.date(),
   payloadVersion: z.string().default('v1'),
   metadata: z.record(z.any()).optional(),
+  groupIds: z.array(z.string().min(4)).optional(), // Optional: specify which groups this location is for
 });
 
 const ingestionResponse = z.object({
@@ -35,12 +37,19 @@ type DocumentedSchema = FastifySchema & {
 /**
  * Public routes for location tracking
  *
- * Location submission flow:
+ * Location submission flow (batched - bus schedule style):
  * 1. User submits location with Auth0 access token
  * 2. Token identifies the user (auth.sub = userId)
- * 3. Find all groups where user is a member AND have active API keys
- * 4. Publish location update to all those groups
- * 5. Only API keys assigned to those groups receive notifications
+ * 3. Optionally specify groupIds in payload, otherwise uses all authorized groups
+ * 4. Location is stored once in database
+ * 5. Location is queued for batching per group with configured update frequencies
+ * 6. Batcher publishes updates at scheduled intervals (like a bus schedule)
+ * 7. Only API keys assigned to those groups receive notifications via SSE stream
+ *
+ * Batching:
+ * - Different groups can have different update frequencies (e.g., 30s, 1m, 5m)
+ * - Updates are batched and published at scheduled intervals
+ * - Only the latest location per user/device is kept in each group's queue
  *
  * Stream subscription:
  * - Requires API key authentication (developer apps)
@@ -93,16 +102,41 @@ export async function registerPublicLocationRoutes(app: FastifyInstance) {
       const userId = user?.id ?? auth.sub;
       const deviceId = body.deviceId || userId; // Use userId as deviceId if not provided
 
-      // Find all groups where this user is a member AND have active API keys
-      // These are the groups that should be notified of the location update
-      // Only API keys assigned to these groups can receive location updates for this user
-      const authorizedGroups = await findAuthorizedGroupsForUser(userId);
-
-      if (authorizedGroups.length === 0) {
-        reply.code(403);
-        throw new Error(
-          'User is not a member of any groups with active API keys. Join a group with an active app before submitting location data.'
-        );
+      // Determine which groups this location update is for
+      // If groupIds are specified in payload, use those; otherwise use all authorized groups
+      let targetGroupIds: string[];
+      
+      if (body.groupIds && body.groupIds.length > 0) {
+        // Validate that user is a member of all specified groups and they have active shares
+        const activeShares = await db.location_shares.findMany({
+          where: {
+            user_id: userId,
+            group_id: { in: body.groupIds },
+            is_active: true,
+          },
+        });
+        
+        const validGroupIds = activeShares.map((share) => share.group_id);
+        const invalidGroupIds = body.groupIds.filter((id: string) => !validGroupIds.includes(id));
+        
+        if (invalidGroupIds.length > 0) {
+          reply.code(403);
+          throw new Error(
+            `User does not have active location sharing for groups: ${invalidGroupIds.join(', ')}`
+          );
+        }
+        
+        targetGroupIds = validGroupIds;
+      } else {
+        // Fall back to all authorized groups
+        targetGroupIds = await findAuthorizedGroupsForUser(userId);
+        
+        if (targetGroupIds.length === 0) {
+          reply.code(403);
+          throw new Error(
+            'User is not a member of any groups with active API keys. Join a group with an active app before submitting location data.'
+          );
+        }
       }
 
       // Get user's first group for storage (we still need a group_id for the location record)
@@ -157,12 +191,19 @@ export async function registerPublicLocationRoutes(app: FastifyInstance) {
         },
       });
 
-      // Publish location update to all authorized groups
-      // This notifies all groups where:
-      // 1. The user (identified by Auth0 token) is a member
-      // 2. The group has at least one active API key (developer app)
-      // Only API keys assigned to these groups can receive the location update via SSE stream
-      locationBus.publishLocationToGroups(authorizedGroups, {
+      // Queue location update for batching (bus schedule style)
+      // Get active location shares to determine update frequencies
+      // Note: Prisma client needs to be regenerated after schema change: npm run db:generate
+      const activeShares = await db.location_shares.findMany({
+        where: {
+          user_id: userId,
+          group_id: { in: targetGroupIds },
+          is_active: true,
+        },
+      });
+
+      // Create location update payload for batching
+      const locationUpdatePayload = {
         deviceId: payload.deviceId,
         latitude: body.latitude,
         longitude: body.longitude,
@@ -172,7 +213,24 @@ export async function registerPublicLocationRoutes(app: FastifyInstance) {
         recordedAt: body.recordedAt,
         metadata: body.metadata ?? null,
         payloadVersion: body.payloadVersion,
-      });
+      };
+
+      // Queue update for each target group with its configured frequency
+      for (const groupId of targetGroupIds) {
+        const share = activeShares.find((s) => s.group_id === groupId);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // TypeScript might not recognize new fields until IDE reloads
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const frequencySeconds = (share as any)?.frequency ?? 30; // Default 30 seconds if not set
+        
+        locationBatcher.queueLocationUpdate(
+          groupId,
+          locationUpdatePayload,
+          userId,
+          deviceId,
+          frequencySeconds
+        );
+      }
 
       reply.code(202).send({
         id: record.id,
