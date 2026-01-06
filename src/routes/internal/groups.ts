@@ -394,6 +394,70 @@ export async function registerInternalGroupRoutes(app: FastifyInstance): Promise
     }
   );
 
+  // Leave a group
+  app.delete(
+    '/groups/:groupId/leave',
+    {
+      schema: {
+        tags: ['Internal - Groups'],
+        summary: '[Internal] Leave a group',
+        description:
+          'Leave a group by removing your membership. This deletes your membership record from the group. Requires Auth0 authentication.',
+        params: zodToJsonSchemaFastify(z.object({ groupId: z.string().min(4) })),
+        response: {
+          200: zodToJsonSchemaFastify(z.object({ success: z.boolean() })),
+        },
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const auth = await requireAuth(request, reply);
+      const { groupId } = request.params as { groupId: string };
+
+      const userId = auth.sub;
+
+      // Find or create user
+      const user = await findOrCreateUser(userId, auth.email, auth.name);
+
+      // Verify group exists
+      const group = await db.groups.findUnique({
+        where: { id: groupId },
+      });
+
+      if (!group) {
+        reply.code(404);
+        throw new Error('Group not found');
+      }
+
+      // Check if user is a member of the group
+      const membership = await db.group_members.findUnique({
+        where: {
+          group_id_user_id: {
+            group_id: groupId,
+            user_id: user.id,
+          },
+        },
+      });
+
+      if (!membership) {
+        reply.code(404);
+        throw new Error('You are not a member of this group');
+      }
+
+      // Delete the membership
+      await db.group_members.delete({
+        where: {
+          group_id_user_id: {
+            group_id: groupId,
+            user_id: user.id,
+          },
+        },
+      });
+
+      reply.send({ success: true });
+    }
+  );
+
   // Get join requests submitted by the user (user → owner)
   app.get(
     '/groups/membership-requests',
