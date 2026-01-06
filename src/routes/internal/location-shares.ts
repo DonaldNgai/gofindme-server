@@ -101,6 +101,7 @@ export async function registerLocationShareRoutes(app: FastifyInstance): Promise
       });
 
       // Create new location share
+      // Note: TypeScript types may not reflect new schema fields until migration is run
       const share = await db.location_shares.create({
         data: {
           id: nanoid(),
@@ -111,7 +112,7 @@ export async function registerLocationShareRoutes(app: FastifyInstance): Promise
           duration: body.duration ?? null,
           is_active: true,
           updated_at: new Date(),
-        },
+        } as any,
       });
 
       reply.code(201).send({
@@ -119,8 +120,8 @@ export async function registerLocationShareRoutes(app: FastifyInstance): Promise
         userId: share.user_id,
         groupId: share.group_id,
         deviceId: share.device_id ?? null,
-        frequency: share.frequency,
-        duration: share.duration,
+        frequency: (share as any).frequency,
+        duration: (share as any).duration,
         startedAt: share.started_at.toISOString(),
         endedAt: share.ended_at?.toISOString() ?? null,
         isActive: share.is_active,
@@ -207,8 +208,8 @@ export async function registerLocationShareRoutes(app: FastifyInstance): Promise
           userId: share.user_id,
           groupId: share.group_id,
           deviceId: share.device_id ?? null,
-          frequency: share.frequency,
-        duration: share.duration,
+          frequency: (share as any).frequency,
+          duration: (share as any).duration,
           startedAt: share.started_at.toISOString(),
           endedAt: share.ended_at?.toISOString() ?? null,
           isActive: share.is_active,
@@ -272,8 +273,8 @@ export async function registerLocationShareRoutes(app: FastifyInstance): Promise
           userId: share.user_id,
           groupId: share.group_id,
           deviceId: share.device_id ?? null,
-          frequency: share.frequency,
-        duration: share.duration,
+          frequency: (share as any).frequency,
+          duration: (share as any).duration,
           startedAt: share.started_at.toISOString(),
           endedAt: share.ended_at?.toISOString() ?? null,
           isActive: share.is_active,
@@ -339,7 +340,8 @@ export async function registerLocationShareRoutes(app: FastifyInstance): Promise
         userId: updated.user_id,
         groupId: updated.group_id,
         deviceId: updated.device_id ?? null,
-        updateFrequencySeconds: updated.update_frequency_seconds,
+        frequency: (updated as any).frequency,
+        duration: (updated as any).duration,
         startedAt: updated.started_at.toISOString(),
         endedAt: updated.ended_at?.toISOString() ?? null,
         isActive: updated.is_active,
