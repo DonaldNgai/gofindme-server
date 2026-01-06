@@ -53,7 +53,9 @@ export async function buildApp(fastify: FastifyInstance) {
     uiConfig: {
       docExpansion: 'list',
       deepLinking: true,
+      persistAuthorization: false,
     },
+    staticCSP: true,
   });
 
   // Health check endpoint (no prefix)
