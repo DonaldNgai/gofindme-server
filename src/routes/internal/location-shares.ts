@@ -38,7 +38,7 @@ export async function registerLocationShareRoutes(app: FastifyInstance): Promise
             groupId: z.string().min(4),
             deviceId: z.string().optional(),
             frequency: z.number().int().min(5).max(300).optional(), // Update frequency in seconds (5s to 5min)
-            duration: z.number().int().positive().optional(), // Share duration in seconds (optional)
+            duration: z.number().int().min(1).optional(), // Share duration in seconds (optional, minimum 1 second)
           })
         ),
         response: {
