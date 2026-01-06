@@ -4,7 +4,6 @@ import { z } from 'zod';
 import { prisma as db } from '../../db.js';
 import { locationBus } from '../../services/bus.js';
 import { locationBatcher } from '../../services/location-batcher.js';
-import { findAuthorizedGroupsForUser } from '../../services/location-auth.js';
 import { requireApiKey } from '../../utils/api-key.js';
 import { requireAuth } from '../../utils/auth.js';
 import { zodToJsonSchemaFastify } from '../../utils/zod-to-json-schema.js';
@@ -103,38 +102,52 @@ export async function registerPublicLocationRoutes(app: FastifyInstance) {
       const deviceId = body.deviceId || userId; // Use userId as deviceId if not provided
 
       // Determine which groups this location update is for
-      // If groupIds are specified in payload, use those; otherwise use all authorized groups
+      // If groupIds are specified in payload, use those; otherwise use all groups where user is a member
       let targetGroupIds: string[];
       
       if (body.groupIds && body.groupIds.length > 0) {
-        // Validate that user is a member of all specified groups and they have active shares
-        const activeShares = await db.location_shares.findMany({
+        // Validate that user is a member of all specified groups
+        const memberships = await db.group_members.findMany({
           where: {
             user_id: userId,
             group_id: { in: body.groupIds },
-            is_active: true,
+            status: {
+              not: 'pending', // Exclude pending memberships
+            },
           },
         });
         
-        const validGroupIds = activeShares.map((share) => share.group_id);
+        const validGroupIds = memberships.map((m) => m.group_id);
         const invalidGroupIds = body.groupIds.filter((id: string) => !validGroupIds.includes(id));
         
         if (invalidGroupIds.length > 0) {
           reply.code(403);
           throw new Error(
-            `User does not have active location sharing for groups: ${invalidGroupIds.join(', ')}`
+            `User is not an active member of groups: ${invalidGroupIds.join(', ')}`
           );
         }
         
         targetGroupIds = validGroupIds;
       } else {
-        // Fall back to all authorized groups
-        targetGroupIds = await findAuthorizedGroupsForUser(userId);
+        // Fall back to all groups where user is an active member
+        const memberships = await db.group_members.findMany({
+          where: {
+            user_id: userId,
+            status: {
+              not: 'pending', // Exclude pending memberships
+            },
+          },
+          select: {
+            group_id: true,
+          },
+        });
+        
+        targetGroupIds = memberships.map((m) => m.group_id);
         
         if (targetGroupIds.length === 0) {
           reply.code(403);
           throw new Error(
-            'User is not a member of any groups with active API keys. Join a group with an active app before submitting location data.'
+            'User is not a member of any groups. Join a group before submitting location data.'
           );
         }
       }
@@ -192,8 +205,10 @@ export async function registerPublicLocationRoutes(app: FastifyInstance) {
       });
 
       // Queue location update for batching (bus schedule style)
-      // Get active location shares to determine update frequencies
-      // Note: Prisma client needs to be regenerated after schema change: npm run db:generate
+      // Location data is ALWAYS saved to the database above, regardless of API keys
+      // We queue for batching for all groups the user is a member of
+      // If a group has no API keys/subscribers, the publish will simply have no listeners (that's fine)
+      // Get active location shares to determine update frequencies (if they exist)
       const activeShares = await db.location_shares.findMany({
         where: {
           user_id: userId,
@@ -216,6 +231,7 @@ export async function registerPublicLocationRoutes(app: FastifyInstance) {
       };
 
       // Queue update for each target group with its configured frequency
+      // This queues for ALL groups regardless of API keys - if no one is subscribed, publish just won't be received
       for (const groupId of targetGroupIds) {
         const share = activeShares.find((s) => s.group_id === groupId);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
