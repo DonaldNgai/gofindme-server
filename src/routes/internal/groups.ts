@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import { prisma as db } from '../../db.js';
 import { requireAuth } from '../../utils/auth.js';
@@ -275,14 +276,15 @@ export async function registerInternalGroupRoutes(app: FastifyInstance): Promise
     }
   );
 
-  // Join request endpoint (public but moved here for organization)
+  // Join request endpoint (user → owner)
   app.post(
     '/groups/:groupId/join',
     {
       schema: {
         tags: ['Internal - Groups'],
         summary: '[Internal] Submit a join request for a group',
-        description: 'Internal endpoint for group join requests. Requires Auth0 authentication.',
+        description:
+          'Submit a JOIN REQUEST to join a group. This creates a request from the user to the group owner, which needs to be approved. This is different from invitations (owner → user). Requires Auth0 authentication.',
         params: zodToJsonSchemaFastify(z.object({ groupId: z.string().min(4) })),
         body: zodToJsonSchemaFastify(
           z.object({
@@ -392,15 +394,15 @@ export async function registerInternalGroupRoutes(app: FastifyInstance): Promise
     }
   );
 
-  // Get membership requests submitted by the user
+  // Get join requests submitted by the user (user → owner)
   app.get(
     '/groups/membership-requests',
     {
       schema: {
         tags: ['Internal - Groups'],
-        summary: '[Internal] Get membership requests submitted by the user',
+        summary: '[Internal] Get join requests submitted by the user',
         description:
-          'Get all pending membership requests that the authenticated user has submitted to groups. Requires Auth0 authentication.',
+          'Get all JOIN REQUESTS that the authenticated user has submitted to groups. These are requests from the user to join a group, which need to be approved by the group owner. This is different from invitations (owner → user). Requires Auth0 authentication.',
         querystring: zodToJsonSchemaFastify(
           z.object({
             status: z.enum(['pending', 'active', 'rejected']).optional(),
@@ -417,6 +419,7 @@ export async function registerInternalGroupRoutes(app: FastifyInstance): Promise
                   groupDescription: z.string().nullable(),
                   status: z.string(),
                   createdAt: z.string(),
+                  type: z.literal('join_request'), // User → Owner: request to join
                 })
               ),
             })
@@ -461,12 +464,13 @@ export async function registerInternalGroupRoutes(app: FastifyInstance): Promise
           groupDescription: request.groups.description ?? null,
           status: request.status,
           createdAt: request.created_at.toISOString(),
+          type: 'join_request' as const, // User → Owner: request to join
         })),
       });
     }
   );
 
-  // Get pending invitations for the user
+  // Get pending invitations for the user (owner → user)
   app.get(
     '/groups/pending-invitations',
     {
@@ -474,7 +478,7 @@ export async function registerInternalGroupRoutes(app: FastifyInstance): Promise
         tags: ['Internal - Groups'],
         summary: '[Internal] Get pending invitations for the user',
         description:
-          'Get all pending group invitations for the authenticated user. Requires Auth0 authentication.',
+          'Get all pending group INVITATIONS for the authenticated user. These are invitations sent from group owners to the user, which the user can accept. This is different from join requests (user → owner). Requires Auth0 authentication.',
         response: {
           200: zodToJsonSchemaFastify(
             z.object({
@@ -487,6 +491,7 @@ export async function registerInternalGroupRoutes(app: FastifyInstance): Promise
                   invitedBy: z.string(),
                   expiresAt: z.string().nullable(),
                   createdAt: z.string(),
+                  type: z.literal('invitation'), // Owner → User: invitation to join
                 })
               ),
             })
@@ -528,12 +533,13 @@ export async function registerInternalGroupRoutes(app: FastifyInstance): Promise
           invitedBy: invitation.invited_by,
           expiresAt: invitation.expires_at?.toISOString() ?? null,
           createdAt: invitation.created_at.toISOString(),
+          type: 'invitation' as const, // Owner → User: invitation to join
         })),
       });
     }
   );
 
-  // Invite user to group by email
+  // Invite user to group by email (owner invites user - creates invitation)
   app.post(
     '/groups/:groupId/invite-by-email',
     {
@@ -541,18 +547,19 @@ export async function registerInternalGroupRoutes(app: FastifyInstance): Promise
         tags: ['Internal - Groups'],
         summary: '[Internal] Invite user to group by email',
         description:
-          'Invite a user to a group by email address. Creates pending membership. Requires Auth0 authentication.',
+          'Invite a user to a group by email address. This creates an INVITATION (owner → user) that the user can accept. This is different from a join request (user → owner). Requires Auth0 authentication.',
         params: zodToJsonSchemaFastify(z.object({ groupId: z.string().min(4) })),
         body: zodToJsonSchemaFastify(
           z.object({
             email: z.string().email(),
+            expiresAt: z.coerce.date().optional(),
           })
         ),
         response: {
           200: zodToJsonSchemaFastify(
             z.object({
               success: z.boolean(),
-              memberId: z.string(),
+              invitationId: z.string(),
               status: z.literal('pending'),
             })
           ),
@@ -563,7 +570,7 @@ export async function registerInternalGroupRoutes(app: FastifyInstance): Promise
     async (request: FastifyRequest, reply: FastifyReply) => {
       const auth = await requireAuth(request, reply);
       const { groupId } = request.params as { groupId: string };
-      const body = request.body as { email: string };
+      const body = request.body as { email: string; expiresAt?: Date };
 
       const userId = auth.sub;
 
@@ -595,41 +602,51 @@ export async function registerInternalGroupRoutes(app: FastifyInstance): Promise
         });
       }
 
-      // Create or update membership to pending
-      const member = await db.group_members.upsert({
+      // Check if invitation already exists
+      const existing = await db.group_invitations.findUnique({
         where: {
           group_id_user_id: {
             group_id: groupId,
             user_id: targetUser.id,
           },
         },
-        create: {
+      });
+
+      if (existing && existing.status === 'pending') {
+        reply.code(409);
+        throw new Error('Invitation already exists and is pending');
+      }
+
+      // Create invitation (owner → user)
+      const invitation = await db.group_invitations.create({
+        data: {
+          id: nanoid(),
           group_id: groupId,
           user_id: targetUser.id,
+          invited_by: authenticatedUser.id,
           status: 'pending',
-        },
-        update: {
-          status: 'pending',
+          expires_at: body.expiresAt,
+          updated_at: new Date(),
         },
       });
 
       reply.send({
         success: true,
-        memberId: member.id,
+        invitationId: invitation.id,
         status: 'pending' as const,
       });
     }
   );
 
-  // Get pending membership requests for a group
+  // Get pending join requests for a group (user → owner)
   app.get(
     '/groups/:groupId/members/pending',
     {
       schema: {
         tags: ['Internal - Groups'],
-        summary: '[Internal] Get pending membership requests for a group',
+        summary: '[Internal] Get pending join requests for a group',
         description:
-          'Get all pending membership requests for a specific group. Requires Auth0 authentication.',
+          'Get all pending JOIN REQUESTS for a specific group. These are requests from users wanting to join the group, which need to be approved by the group owner. This is different from invitations (owner → user). Requires Auth0 authentication.',
         params: zodToJsonSchemaFastify(z.object({ groupId: z.string().min(4) })),
         response: {
           200: zodToJsonSchemaFastify(
@@ -640,6 +657,7 @@ export async function registerInternalGroupRoutes(app: FastifyInstance): Promise
                   userEmail: z.string(),
                   userName: z.string().nullable(),
                   createdAt: z.string(),
+                  type: z.literal('join_request'), // User → Owner: request to join
                 })
               ),
             })
@@ -690,12 +708,13 @@ export async function registerInternalGroupRoutes(app: FastifyInstance): Promise
           userEmail: member.users.email,
           userName: member.users.name ?? null,
           createdAt: member.created_at.toISOString(),
+          type: 'join_request' as const, // User → Owner: request to join
         })),
       });
     }
   );
 
-  // Batch invite users to groups
+  // Batch invite users to groups (owner invites users - creates invitations)
   app.post(
     '/groups/batch-invite',
     {
@@ -703,11 +722,12 @@ export async function registerInternalGroupRoutes(app: FastifyInstance): Promise
         tags: ['Internal - Groups'],
         summary: '[Internal] Batch invite users to groups',
         description:
-          'Invite multiple users to multiple groups in one request. Requires Auth0 authentication.',
+          'Invite multiple users to multiple groups in one request. This creates INVITATIONS (owner → users) that users can accept. This is different from join requests (users → owner). Requires Auth0 authentication.',
         body: zodToJsonSchemaFastify(
           z.object({
             userEmails: z.array(z.string().email()),
             groupIds: z.array(z.string().min(4)),
+            expiresAt: z.coerce.date().optional(),
           })
         ),
         response: {
@@ -730,7 +750,11 @@ export async function registerInternalGroupRoutes(app: FastifyInstance): Promise
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const auth = await requireAuth(request, reply);
-      const body = request.body as { userEmails: string[]; groupIds: string[] };
+      const body = request.body as {
+        userEmails: string[];
+        groupIds: string[];
+        expiresAt?: Date;
+      };
 
       const userId = auth.sub;
 
@@ -767,24 +791,32 @@ export async function registerInternalGroupRoutes(app: FastifyInstance): Promise
             });
           }
 
-          // Create memberships for all groups
+          // Create invitations for all groups (owner → users)
           for (const groupId of body.groupIds) {
-            await db.group_members.upsert({
+            // Check if invitation already exists
+            const existing = await db.group_invitations.findUnique({
               where: {
                 group_id_user_id: {
                   group_id: groupId,
                   user_id: targetUser.id,
                 },
               },
-              create: {
-                group_id: groupId,
-                user_id: targetUser.id,
-                status: 'pending',
-              },
-              update: {
-                status: 'pending',
-              },
             });
+
+            // Only create if it doesn't exist or is not pending
+            if (!existing || existing.status !== 'pending') {
+              await db.group_invitations.create({
+                data: {
+                  id: nanoid(),
+                  group_id: groupId,
+                  user_id: targetUser.id,
+                  invited_by: authenticatedUser.id,
+                  status: 'pending',
+                  expires_at: body.expiresAt,
+                  updated_at: new Date(),
+                },
+              });
+            }
           }
 
           invited++;

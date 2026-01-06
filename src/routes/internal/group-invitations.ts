@@ -21,17 +21,20 @@ const invitationResponse = z.object({
 
 /**
  * Internal routes for group invitations
+ * These handle INVITATIONS (owner → user) that users can accept.
+ * This is different from join requests (user → owner) which are handled in groups.ts
  * These require Auth0 authentication
  */
 export async function registerGroupInvitationRoutes(app: FastifyInstance): Promise<void> {
-  // Create a group invitation
+  // Create a group invitation (owner → user)
   app.post(
     '/groups/:groupId/invitations',
     {
       schema: {
         tags: ['Internal - Group Invitations'],
         summary: '[Internal] Create a group invitation',
-        description: 'Invite a user to join a group. Requires Auth0 authentication.',
+        description:
+          'Invite a user to join a group. This creates an INVITATION (owner → user) that the user can accept. This is different from a join request (user → owner). Requires Auth0 authentication.',
         params: zodToJsonSchemaFastify(z.object({ groupId: z.string().min(4) })),
         body: zodToJsonSchemaFastify(
           z.object({
@@ -121,14 +124,15 @@ export async function registerGroupInvitationRoutes(app: FastifyInstance): Promi
     }
   );
 
-  // List invitations for a group
+  // List invitations for a group (owner → users)
   app.get(
     '/groups/:groupId/invitations',
     {
       schema: {
         tags: ['Internal - Group Invitations'],
         summary: '[Internal] List group invitations',
-        description: 'List all invitations for a group. Requires Auth0 authentication.',
+        description:
+          'List all INVITATIONS for a group (owner → users). These are invitations sent by the group owner to users. This is different from join requests (users → owner). Requires Auth0 authentication.',
         params: zodToJsonSchemaFastify(z.object({ groupId: z.string().min(4) })),
         querystring: zodToJsonSchemaFastify(
           z.object({
@@ -194,7 +198,7 @@ export async function registerGroupInvitationRoutes(app: FastifyInstance): Promi
     }
   );
 
-  // List invitations for current user
+  // List invitations for current user (owner → user)
   app.get(
     '/invitations',
     {
@@ -202,7 +206,7 @@ export async function registerGroupInvitationRoutes(app: FastifyInstance): Promi
         tags: ['Internal - Group Invitations'],
         summary: '[Internal] List my invitations',
         description:
-          'List all invitations for the authenticated user. Requires Auth0 authentication.',
+          'List all INVITATIONS for the authenticated user (owner → user). These are invitations sent by group owners to the user. This is different from join requests (user → owner). Requires Auth0 authentication.',
         querystring: zodToJsonSchemaFastify(
           z.object({
             status: z.enum(['pending', 'accepted', 'rejected']).optional(),
@@ -253,14 +257,15 @@ export async function registerGroupInvitationRoutes(app: FastifyInstance): Promi
     }
   );
 
-  // Accept an invitation
+  // Accept an invitation (owner → user)
   app.post(
     '/invitations/:invitationId/accept',
     {
       schema: {
         tags: ['Internal - Group Invitations'],
         summary: '[Internal] Accept a group invitation',
-        description: 'Accept a group invitation. Requires Auth0 authentication.',
+        description:
+          'Accept a group INVITATION (owner → user). This accepts an invitation sent by a group owner. Requires Auth0 authentication.',
         params: zodToJsonSchemaFastify(z.object({ invitationId: z.string().min(4) })),
         response: {
           200: zodToJsonSchemaFastify(invitationResponse),
@@ -348,14 +353,15 @@ export async function registerGroupInvitationRoutes(app: FastifyInstance): Promi
     }
   );
 
-  // Reject an invitation
+  // Reject an invitation (owner → user)
   app.post(
     '/invitations/:invitationId/reject',
     {
       schema: {
         tags: ['Internal - Group Invitations'],
         summary: '[Internal] Reject a group invitation',
-        description: 'Reject a group invitation. Requires Auth0 authentication.',
+        description:
+          'Reject a group INVITATION (owner → user). This rejects an invitation sent by a group owner. Requires Auth0 authentication.',
         params: zodToJsonSchemaFastify(z.object({ invitationId: z.string().min(4) })),
         response: {
           200: zodToJsonSchemaFastify(invitationResponse),
