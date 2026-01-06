@@ -3,6 +3,7 @@ import { registerInternalApiKeyRoutes } from './api-keys.js';
 import { registerInternalGroupRoutes } from './groups.js';
 import { registerGroupInvitationRoutes } from './group-invitations.js';
 import { registerLocationShareRoutes } from './location-shares.js';
+import { registerUserRoutes } from './users.js';
 
 /**
  * Register all internal routes (for Next.js frontend / Auth0 users)
@@ -24,4 +25,7 @@ export async function registerInternalRoutes(app: FastifyInstance): Promise<void
 
   // Register location share routes
   await registerLocationShareRoutes(app);
+
+  // Register user routes
+  await registerUserRoutes(app);
 }

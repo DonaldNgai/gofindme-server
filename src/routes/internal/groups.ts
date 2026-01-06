@@ -338,4 +338,468 @@ export async function registerInternalGroupRoutes(app: FastifyInstance): Promise
       reply.code(202).send({ status: 'pending', memberId: member.id });
     }
   );
+
+  // Get user's active group memberships
+  app.get(
+    '/groups/memberships',
+    {
+      schema: {
+        tags: ['Internal - Groups'],
+        summary: "[Internal] Get user's active group memberships",
+        description:
+          'Get all groups the authenticated user is an active member of. Requires Auth0 authentication.',
+        response: {
+          200: zodToJsonSchemaFastify(
+            z.object({
+              items: z.array(
+                z.object({
+                  id: z.string(),
+                  name: z.string(),
+                  description: z.string().nullable(),
+                })
+              ),
+            })
+          ),
+        },
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const auth = await requireAuth(request, reply);
+      const userId = auth.sub;
+
+      // Find or create user
+      const user = await findOrCreateUser(userId, auth.email, auth.name);
+
+      // Get all active memberships for the user
+      const memberships = await db.group_members.findMany({
+        where: {
+          user_id: user.id,
+          status: 'active',
+        },
+        include: {
+          groups: true,
+        },
+      });
+
+      reply.send({
+        items: memberships.map((membership) => ({
+          id: membership.groups.id,
+          name: membership.groups.name,
+          description: membership.groups.description ?? null,
+        })),
+      });
+    }
+  );
+
+  // Get membership requests submitted by the user
+  app.get(
+    '/groups/membership-requests',
+    {
+      schema: {
+        tags: ['Internal - Groups'],
+        summary: '[Internal] Get membership requests submitted by the user',
+        description:
+          'Get all pending membership requests that the authenticated user has submitted to groups. Requires Auth0 authentication.',
+        querystring: zodToJsonSchemaFastify(
+          z.object({
+            status: z.enum(['pending', 'active', 'rejected']).optional(),
+          })
+        ),
+        response: {
+          200: zodToJsonSchemaFastify(
+            z.object({
+              items: z.array(
+                z.object({
+                  id: z.string(),
+                  groupId: z.string(),
+                  groupName: z.string(),
+                  groupDescription: z.string().nullable(),
+                  status: z.string(),
+                  createdAt: z.string(),
+                })
+              ),
+            })
+          ),
+        },
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const auth = await requireAuth(request, reply);
+      const query = request.query as { status?: string };
+      const userId = auth.sub;
+
+      // Find or create user
+      const user = await findOrCreateUser(userId, auth.email, auth.name);
+
+      // Build where clause
+      const where: { user_id: string; status?: string } = {
+        user_id: user.id,
+      };
+
+      if (query.status) {
+        where.status = query.status;
+      }
+
+      // Get all membership requests for the user
+      const membershipRequests = await db.group_members.findMany({
+        where,
+        include: {
+          groups: true,
+        },
+        orderBy: {
+          created_at: 'desc',
+        },
+      });
+
+      reply.send({
+        items: membershipRequests.map((request) => ({
+          id: request.id,
+          groupId: request.group_id,
+          groupName: request.groups.name,
+          groupDescription: request.groups.description ?? null,
+          status: request.status,
+          createdAt: request.created_at.toISOString(),
+        })),
+      });
+    }
+  );
+
+  // Get pending invitations for the user
+  app.get(
+    '/groups/pending-invitations',
+    {
+      schema: {
+        tags: ['Internal - Groups'],
+        summary: '[Internal] Get pending invitations for the user',
+        description:
+          'Get all pending group invitations for the authenticated user. Requires Auth0 authentication.',
+        response: {
+          200: zodToJsonSchemaFastify(
+            z.object({
+              items: z.array(
+                z.object({
+                  id: z.string(),
+                  groupId: z.string(),
+                  groupName: z.string(),
+                  groupDescription: z.string().nullable(),
+                  invitedBy: z.string(),
+                  expiresAt: z.string().nullable(),
+                  createdAt: z.string(),
+                })
+              ),
+            })
+          ),
+        },
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const auth = await requireAuth(request, reply);
+      const userId = auth.sub;
+
+      // Find or create user
+      const user = await findOrCreateUser(userId, auth.email, auth.name);
+
+      // Get all pending invitations for the user
+      // Filter out expired invitations
+      const now = new Date();
+      const invitations = await db.group_invitations.findMany({
+        where: {
+          user_id: user.id,
+          status: 'pending',
+          OR: [{ expires_at: null }, { expires_at: { gt: now } }],
+        },
+        include: {
+          groups: true,
+        },
+        orderBy: {
+          created_at: 'desc',
+        },
+      });
+
+      reply.send({
+        items: invitations.map((invitation) => ({
+          id: invitation.id,
+          groupId: invitation.group_id,
+          groupName: invitation.groups.name,
+          groupDescription: invitation.groups.description ?? null,
+          invitedBy: invitation.invited_by,
+          expiresAt: invitation.expires_at?.toISOString() ?? null,
+          createdAt: invitation.created_at.toISOString(),
+        })),
+      });
+    }
+  );
+
+  // Invite user to group by email
+  app.post(
+    '/groups/:groupId/invite-by-email',
+    {
+      schema: {
+        tags: ['Internal - Groups'],
+        summary: '[Internal] Invite user to group by email',
+        description:
+          'Invite a user to a group by email address. Creates pending membership. Requires Auth0 authentication.',
+        params: zodToJsonSchemaFastify(z.object({ groupId: z.string().min(4) })),
+        body: zodToJsonSchemaFastify(
+          z.object({
+            email: z.string().email(),
+          })
+        ),
+        response: {
+          200: zodToJsonSchemaFastify(
+            z.object({
+              success: z.boolean(),
+              memberId: z.string(),
+              status: z.literal('pending'),
+            })
+          ),
+        },
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const auth = await requireAuth(request, reply);
+      const { groupId } = request.params as { groupId: string };
+      const body = request.body as { email: string };
+
+      const userId = auth.sub;
+
+      // Find or create authenticated user
+      const authenticatedUser = await findOrCreateUser(userId, auth.email, auth.name);
+
+      // Verify group exists and user is owner
+      const group = await db.groups.findFirst({
+        where: {
+          id: groupId,
+          owner_id: authenticatedUser.id,
+        },
+      });
+
+      if (!group) {
+        reply.code(404);
+        throw new Error('Group not found or you are not the owner');
+      }
+
+      // Find or create target user by email
+      let targetUser = await db.users.findUnique({
+        where: { email: body.email },
+      });
+
+      if (!targetUser) {
+        // Create user with email only (no Auth0 ID since they haven't logged in yet)
+        targetUser = await db.users.create({
+          data: { email: body.email },
+        });
+      }
+
+      // Create or update membership to pending
+      const member = await db.group_members.upsert({
+        where: {
+          group_id_user_id: {
+            group_id: groupId,
+            user_id: targetUser.id,
+          },
+        },
+        create: {
+          group_id: groupId,
+          user_id: targetUser.id,
+          status: 'pending',
+        },
+        update: {
+          status: 'pending',
+        },
+      });
+
+      reply.send({
+        success: true,
+        memberId: member.id,
+        status: 'pending' as const,
+      });
+    }
+  );
+
+  // Get pending membership requests for a group
+  app.get(
+    '/groups/:groupId/members/pending',
+    {
+      schema: {
+        tags: ['Internal - Groups'],
+        summary: '[Internal] Get pending membership requests for a group',
+        description:
+          'Get all pending membership requests for a specific group. Requires Auth0 authentication.',
+        params: zodToJsonSchemaFastify(z.object({ groupId: z.string().min(4) })),
+        response: {
+          200: zodToJsonSchemaFastify(
+            z.object({
+              items: z.array(
+                z.object({
+                  id: z.string(),
+                  userEmail: z.string(),
+                  userName: z.string().nullable(),
+                  createdAt: z.string(),
+                })
+              ),
+            })
+          ),
+        },
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const auth = await requireAuth(request, reply);
+      const { groupId } = request.params as { groupId: string };
+
+      const userId = auth.sub;
+
+      // Find or create authenticated user
+      const user = await findOrCreateUser(userId, auth.email, auth.name);
+
+      // Verify group exists and user is owner
+      const group = await db.groups.findFirst({
+        where: {
+          id: groupId,
+          owner_id: user.id,
+        },
+      });
+
+      if (!group) {
+        reply.code(404);
+        throw new Error('Group not found or you are not the owner');
+      }
+
+      // Get pending memberships
+      const pendingMembers = await db.group_members.findMany({
+        where: {
+          group_id: groupId,
+          status: 'pending',
+        },
+        include: {
+          users: true,
+        },
+        orderBy: {
+          created_at: 'desc',
+        },
+      });
+
+      reply.send({
+        items: pendingMembers.map((member) => ({
+          id: member.id,
+          userEmail: member.users.email,
+          userName: member.users.name ?? null,
+          createdAt: member.created_at.toISOString(),
+        })),
+      });
+    }
+  );
+
+  // Batch invite users to groups
+  app.post(
+    '/groups/batch-invite',
+    {
+      schema: {
+        tags: ['Internal - Groups'],
+        summary: '[Internal] Batch invite users to groups',
+        description:
+          'Invite multiple users to multiple groups in one request. Requires Auth0 authentication.',
+        body: zodToJsonSchemaFastify(
+          z.object({
+            userEmails: z.array(z.string().email()),
+            groupIds: z.array(z.string().min(4)),
+          })
+        ),
+        response: {
+          200: zodToJsonSchemaFastify(
+            z.object({
+              success: z.boolean(),
+              invited: z.number(),
+              failed: z.number(),
+              errors: z.array(
+                z.object({
+                  email: z.string(),
+                  error: z.string(),
+                })
+              ),
+            })
+          ),
+        },
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const auth = await requireAuth(request, reply);
+      const body = request.body as { userEmails: string[]; groupIds: string[] };
+
+      const userId = auth.sub;
+
+      // Find or create authenticated user
+      const authenticatedUser = await findOrCreateUser(userId, auth.email, auth.name);
+
+      // Verify all groups exist and user is owner
+      const groups = await db.groups.findMany({
+        where: {
+          id: { in: body.groupIds },
+          owner_id: authenticatedUser.id,
+        },
+      });
+
+      if (groups.length !== body.groupIds.length) {
+        reply.code(403);
+        throw new Error('One or more groups not found or you are not the owner');
+      }
+
+      const errors: Array<{ email: string; error: string }> = [];
+      let invited = 0;
+
+      // Process each email and group combination
+      for (const email of body.userEmails) {
+        try {
+          // Find or create target user by email
+          let targetUser = await db.users.findUnique({
+            where: { email },
+          });
+
+          if (!targetUser) {
+            targetUser = await db.users.create({
+              data: { email },
+            });
+          }
+
+          // Create memberships for all groups
+          for (const groupId of body.groupIds) {
+            await db.group_members.upsert({
+              where: {
+                group_id_user_id: {
+                  group_id: groupId,
+                  user_id: targetUser.id,
+                },
+              },
+              create: {
+                group_id: groupId,
+                user_id: targetUser.id,
+                status: 'pending',
+              },
+              update: {
+                status: 'pending',
+              },
+            });
+          }
+
+          invited++;
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          errors.push({ email, error: errorMessage });
+        }
+      }
+
+      reply.send({
+        success: true,
+        invited,
+        failed: errors.length,
+        errors,
+      });
+    }
+  );
 }

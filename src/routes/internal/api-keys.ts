@@ -11,6 +11,7 @@ const apiKeyResponse = z.object({
   label: z.string(),
   createdAt: z.string(),
   lastUsedAt: z.string().nullable(),
+  groupId: z.string(),
 });
 
 /**
@@ -155,11 +156,18 @@ export async function registerInternalApiKeyRoutes(app: FastifyInstance): Promis
 
         reply.send({
           items: rows.map(
-            (row: { id: string; label: string; created_at: Date; last_used_at: Date | null }) => ({
+            (row: {
+              id: string;
+              label: string;
+              created_at: Date;
+              last_used_at: Date | null;
+              group_id: string;
+            }) => ({
               id: row.id,
               label: row.label,
               createdAt: row.created_at.toISOString(),
               lastUsedAt: row.last_used_at?.toISOString() ?? null,
+              groupId: row.group_id,
             })
           ),
         });
@@ -170,11 +178,18 @@ export async function registerInternalApiKeyRoutes(app: FastifyInstance): Promis
 
       reply.send({
         items: rows.map(
-          (row: { id: string; label: string; created_at: Date; last_used_at: Date | null }) => ({
+          (row: {
+            id: string;
+            label: string;
+            created_at: Date;
+            last_used_at: Date | null;
+            group_id: string;
+          }) => ({
             id: row.id,
             label: row.label,
             createdAt: row.created_at.toISOString(),
             lastUsedAt: row.last_used_at?.toISOString() ?? null,
+            groupId: row.group_id,
           })
         ),
       });
