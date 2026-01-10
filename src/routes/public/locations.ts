@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { prisma as db } from '../../db.js';
 import { locationBus } from '../../services/bus.js';
 import { locationBatcher } from '../../services/location-batcher.js';
+import { env } from '../../config/env.js';
 import { requireApiKey } from '../../utils/api-key.js';
 import { requireAuth } from '../../utils/auth.js';
 import { zodToJsonSchemaFastify } from '../../utils/zod-to-json-schema.js';
@@ -344,12 +345,27 @@ export async function registerPublicLocationRoutes(app: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const apiKey = await requireApiKey(request, reply);
-      openLocationStream(reply, apiKey.group_id);
+      openLocationStream(request, reply, apiKey.group_id);
     }
   );
 }
 
-function openLocationStream(reply: FastifyReply, groupId: string) {
+function openLocationStream(request: FastifyRequest, reply: FastifyReply, groupId: string) {
+  // Set CORS headers before hijacking (hijack bypasses Fastify's CORS plugin)
+  const origin = request.headers.origin;
+  if (env.NODE_ENV === 'development') {
+    // In development, allow all origins
+    reply.raw.setHeader('Access-Control-Allow-Origin', origin || '*');
+    reply.raw.setHeader('Access-Control-Allow-Credentials', 'true');
+  } else {
+    // In production, check against configured origins
+    const allowedOrigins = env.CORS_ORIGIN.split(',').map((o) => o.trim());
+    if (origin && allowedOrigins.includes(origin)) {
+      reply.raw.setHeader('Access-Control-Allow-Origin', origin);
+      reply.raw.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+  }
+
   reply.raw.setHeader('Content-Type', 'text/event-stream');
   reply.raw.setHeader('Cache-Control', 'no-cache');
   reply.raw.setHeader('Connection', 'keep-alive');
