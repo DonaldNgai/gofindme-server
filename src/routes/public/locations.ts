@@ -255,6 +255,81 @@ export async function registerPublicLocationRoutes(app: FastifyInstance) {
     }
   );
 
+  // Query latest locations
+  app.get(
+    '/locations',
+    {
+      schema: {
+        tags: ['Locations'],
+        summary: 'Get latest location data',
+        description:
+          'Query the latest location data for devices in the API key\'s group. Requires API key authentication.',
+        querystring: zodToJsonSchemaFastify(
+          z.object({
+            deviceId: z.string().optional(),
+            limit: z.coerce.number().int().min(1).max(100).default(50).optional(),
+          })
+        ),
+        response: {
+          200: zodToJsonSchemaFastify(
+            z.object({
+              items: z.array(
+                z.object({
+                  id: z.string(),
+                  groupId: z.string(),
+                  deviceId: z.string(),
+                  latitude: z.number(),
+                  longitude: z.number(),
+                  accuracy: z.number().nullable(),
+                  heading: z.number().nullable(),
+                  speed: z.number().nullable(),
+                  recordedAt: z.string(),
+                  receivedAt: z.string(),
+                  metadata: z.record(z.any()).nullable(),
+                })
+              ),
+            })
+          ),
+        },
+        security: [{ apiKey: [] }],
+      } as DocumentedSchema,
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const apiKey = await requireApiKey(request, reply);
+      const query = request.query as { deviceId?: string; limit?: number };
+
+      const where: { group_id: string; device_id?: string } = {
+        group_id: apiKey.group_id,
+      };
+
+      if (query.deviceId) {
+        where.device_id = query.deviceId;
+      }
+
+      const locations = await db.locations.findMany({
+        where,
+        orderBy: { recorded_at: 'desc' },
+        take: query.limit ?? 50,
+      });
+
+      reply.send({
+        items: locations.map((loc) => ({
+          id: loc.id,
+          groupId: loc.group_id,
+          deviceId: loc.device_id,
+          latitude: loc.latitude,
+          longitude: loc.longitude,
+          accuracy: loc.accuracy,
+          heading: loc.heading,
+          speed: loc.speed,
+          recordedAt: loc.recorded_at.toISOString(),
+          receivedAt: loc.received_at.toISOString(),
+          metadata: loc.metadata ? JSON.parse(loc.metadata) : null,
+        })),
+      });
+    }
+  );
+
   // Stream location events
   app.get(
     '/stream',

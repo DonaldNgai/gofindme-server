@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
+    "build:client": "cd packages/client && npm run build",
+    "build:all": "npm run build && npm run build:client",
     "start": "node dist/server.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -22,7 +24,10 @@
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
-    "db:introspect": "prisma db pull"
+    "db:introspect": "prisma db pull",
+    "client:build": "cd packages/client && npm run build",
+    "client:publish": "cd packages/client && npm publish",
+    "client:publish:public": "cd packages/client && npm publish --access public"
   },
   "keywords": [
     "fastify",
