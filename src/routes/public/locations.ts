@@ -383,6 +383,25 @@ export async function registerPublicLocationRoutes(app: FastifyInstance) {
     }
   );
 
+  // Handle OPTIONS preflight for stream endpoint
+  app.options('/stream', async (request: FastifyRequest, reply: FastifyReply) => {
+    // CORS headers are handled by the CORS plugin, but we ensure they're set here too
+    const origin = request.headers.origin;
+    if (env.NODE_ENV === 'development') {
+      reply.header('Access-Control-Allow-Origin', origin || '*');
+      reply.header('Access-Control-Allow-Credentials', 'true');
+    } else {
+      const allowedOrigins = env.CORS_ORIGIN.split(',').map((o) => o.trim());
+      if (origin && allowedOrigins.includes(origin)) {
+        reply.header('Access-Control-Allow-Origin', origin);
+        reply.header('Access-Control-Allow-Credentials', 'true');
+      }
+    }
+    reply.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    reply.header('Access-Control-Allow-Headers', 'X-API-Key, Content-Type');
+    reply.code(204).send();
+  });
+
   // Stream location events
   app.get(
     '/stream',
