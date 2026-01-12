@@ -243,7 +243,7 @@ describe('Location Integration Tests - Phone App & Developer App', () => {
         receivedAt: Date;
       }> = [];
 
-      const unsubscribe = locationBus.subscribe(testGroup1Id, (event) => {
+      const unsubscribe = locationBus.subscribeForTesting(testGroup1Id, (event) => {
         if (event.type === 'location') {
           receivedLocations.push({
             deviceId: event.data.deviceId,

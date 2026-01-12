@@ -218,7 +218,7 @@ export async function registerPublicLocationRoutes(app: FastifyInstance) {
         },
       });
 
-      // Create location update payload for batching
+      // Create location update payload for batching and immediate push
       const locationUpdatePayload = {
         deviceId: payload.deviceId,
         latitude: body.latitude,
@@ -231,8 +231,12 @@ export async function registerPublicLocationRoutes(app: FastifyInstance) {
         payloadVersion: body.payloadVersion,
       };
 
-      // Queue update for each target group with its configured frequency
-      // This queues for ALL groups regardless of API keys - if no one is subscribed, publish just won't be received
+      // Immediately push location data to all connected clients whose API keys have access to the target groups
+      // The bus will only push to groups that have active subscribers (connected clients)
+      locationBus.publishLocationToGroups(targetGroupIds, locationUpdatePayload);
+
+      // Queue update for each target group with its configured frequency for scheduled batching
+      // This allows clients to receive updates at configured intervals even if they connect later
       for (const groupId of targetGroupIds) {
         const share = activeShares.find((s) => s.group_id === groupId);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -264,7 +268,7 @@ export async function registerPublicLocationRoutes(app: FastifyInstance) {
         tags: ['Locations'],
         summary: 'Get latest location data',
         description:
-          'Query the latest location data for devices in the API key\'s group. Requires API key authentication.',
+          'Returns the most recent location data for each device within the API key\'s authorized group. Requires API key authentication via X-API-Key header.',
         querystring: zodToJsonSchemaFastify(
           z.object({
             deviceId: z.string().optional(),
@@ -299,22 +303,70 @@ export async function registerPublicLocationRoutes(app: FastifyInstance) {
       const apiKey = await requireApiKey(request, reply);
       const query = request.query as { deviceId?: string; limit?: number };
 
-      const where: { group_id: string; device_id?: string } = {
-        group_id: apiKey.group_id,
+      // Use DISTINCT ON to get the most recent location per device
+      // This PostgreSQL-specific feature efficiently returns one row per device_id
+      type LocationRow = {
+        id: string;
+        group_id: string;
+        device_id: string;
+        latitude: number;
+        longitude: number;
+        accuracy: number | null;
+        heading: number | null;
+        speed: number | null;
+        recorded_at: Date;
+        received_at: Date;
+        metadata: string | null;
       };
 
+      let locations: LocationRow[];
+
       if (query.deviceId) {
-        where.device_id = query.deviceId;
+        // If filtering by deviceId, use Prisma.sql for parameterized query
+        locations = await db.$queryRaw<LocationRow[]>`
+          SELECT DISTINCT ON (device_id)
+            id,
+            group_id,
+            device_id,
+            latitude,
+            longitude,
+            accuracy,
+            heading,
+            speed,
+            recorded_at,
+            received_at,
+            metadata
+          FROM locations
+          WHERE group_id = ${apiKey.group_id}
+            AND device_id = ${query.deviceId}
+          ORDER BY device_id, recorded_at DESC
+        `;
+      } else {
+        // Get latest location for each device in the group
+        locations = await db.$queryRaw<LocationRow[]>`
+          SELECT DISTINCT ON (device_id)
+            id,
+            group_id,
+            device_id,
+            latitude,
+            longitude,
+            accuracy,
+            heading,
+            speed,
+            recorded_at,
+            received_at,
+            metadata
+          FROM locations
+          WHERE group_id = ${apiKey.group_id}
+          ORDER BY device_id, recorded_at DESC
+        `;
       }
 
-      const locations = await db.locations.findMany({
-        where,
-        orderBy: { recorded_at: 'desc' },
-        take: query.limit ?? 50,
-      });
+      // Apply limit if specified (limit is applied after getting latest per device)
+      const limitedLocations = query.limit ? locations.slice(0, query.limit) : locations;
 
       reply.send({
-        items: locations.map((loc) => ({
+        items: limitedLocations.map((loc) => ({
           id: loc.id,
           groupId: loc.group_id,
           deviceId: loc.device_id,
@@ -344,13 +396,19 @@ export async function registerPublicLocationRoutes(app: FastifyInstance) {
       } as DocumentedSchema,
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
+      // Require valid API key - subscription is only allowed with valid API key
       const apiKey = await requireApiKey(request, reply);
-      openLocationStream(request, reply, apiKey.group_id);
+      openLocationStream(request, reply, apiKey.group_id, apiKey.id);
     }
   );
 }
 
-function openLocationStream(request: FastifyRequest, reply: FastifyReply, groupId: string) {
+function openLocationStream(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  groupId: string,
+  apiKeyId: string
+) {
   // Set CORS headers before hijacking (hijack bypasses Fastify's CORS plugin)
   const origin = request.headers.origin;
   if (env.NODE_ENV === 'development') {
@@ -381,7 +439,11 @@ function openLocationStream(request: FastifyRequest, reply: FastifyReply, groupI
 
   send('ready', { groupId });
 
-  const unsubscribe = locationBus.subscribe(groupId, (event) => {
+  // Subscribe to location updates for this group
+  // The bus tracks which API keys are subscribed to which groups
+  // Only authorized subscribers (with valid API keys) can receive location data
+  const unsubscribe = locationBus.subscribe(groupId, apiKeyId, (event) => {
+    console.log('[LocationStream] Received event from bus', { groupId, apiKeyId, eventType: event.type, eventData: event.data });
     send(event.type, event.data);
   });
 
@@ -392,6 +454,7 @@ function openLocationStream(request: FastifyRequest, reply: FastifyReply, groupI
 
   res.on('close', () => {
     clearInterval(heartbeat);
+    // Unsubscribe when connection closes - removes this subscriber from tracking
     unsubscribe();
     res.end();
   });

@@ -339,15 +339,15 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
       const busEvents: Array<{ groupId: string; deviceId: string }> = [];
 
       // Subscribe to all groups
-      const unsubscribe1 = locationBus.subscribe(testGroup1Id, (event) => {
+      const unsubscribe1 = locationBus.subscribeForTesting(testGroup1Id, (event) => {
         console.log(`[Test] Group1 received event:`, event.data.deviceId);
         busEvents.push({ groupId: testGroup1Id, deviceId: event.data.deviceId });
       });
-      const unsubscribe2 = locationBus.subscribe(testGroup2Id, (event) => {
+      const unsubscribe2 = locationBus.subscribeForTesting(testGroup2Id, (event) => {
         console.log(`[Test] Group2 received event:`, event.data.deviceId);
         busEvents.push({ groupId: testGroup2Id, deviceId: event.data.deviceId });
       });
-      const unsubscribe3 = locationBus.subscribe(testGroup3Id, (event) => {
+      const unsubscribe3 = locationBus.subscribeForTesting(testGroup3Id, (event) => {
         console.log(`[Test] Group3 received event:`, event.data.deviceId);
         busEvents.push({ groupId: testGroup3Id, deviceId: event.data.deviceId });
       });
@@ -568,15 +568,15 @@ describe('Location Data Incoming - User Submissions with Authorization', () => {
 
       // Subscribe to all groups
       const unsubscribes = [
-        locationBus.subscribe(testGroup1Id, (event) => {
+        locationBus.subscribeForTesting(testGroup1Id, (event) => {
           console.log(`[Test] Group1 received:`, event.data.deviceId);
           busEvents[testGroup1Id].push({ groupId: testGroup1Id, deviceId: event.data.deviceId });
         }),
-        locationBus.subscribe(testGroup2Id, (event) => {
+        locationBus.subscribeForTesting(testGroup2Id, (event) => {
           console.log(`[Test] Group2 received:`, event.data.deviceId);
           busEvents[testGroup2Id].push({ groupId: testGroup2Id, deviceId: event.data.deviceId });
         }),
-        locationBus.subscribe(testGroup3Id, (event) => {
+        locationBus.subscribeForTesting(testGroup3Id, (event) => {
           console.log(`[Test] Group3 received:`, event.data.deviceId);
           busEvents[testGroup3Id].push({ groupId: testGroup3Id, deviceId: event.data.deviceId });
         }),

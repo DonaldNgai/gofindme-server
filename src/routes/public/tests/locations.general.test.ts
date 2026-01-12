@@ -139,8 +139,8 @@ describe('Location Updates - Performance and Stress Tests', () => {
       const numUpdates = 5;
       const receivedUpdates: LocationUpdatePayload[] = [];
 
-      // Subscribe to bus events
-      const unsubscribe = locationBus.subscribe(testGroupId, (event) => {
+      // Subscribe to bus events (for testing)
+      const unsubscribe = locationBus.subscribeForTesting(testGroupId, (event) => {
         receivedUpdates.push(event.data);
       });
 
