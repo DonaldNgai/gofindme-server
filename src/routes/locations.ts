@@ -116,12 +116,12 @@ export async function registerLocationRoutes(app: FastifyInstance): Promise<void
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const apiKey = await requireApiKey(request, reply);
-      openLocationStream(reply, apiKey.group_id);
+      openLocationStream(reply, apiKey.group_id, apiKey.id);
     }
   );
 }
 
-function openLocationStream(reply: FastifyReply, groupId: string): void {
+function openLocationStream(reply: FastifyReply, groupId: string, apiKeyId: string): void {
   reply.raw.setHeader('Content-Type', 'text/event-stream');
   reply.raw.setHeader('Cache-Control', 'no-cache');
   reply.raw.setHeader('Connection', 'keep-alive');
@@ -137,7 +137,7 @@ function openLocationStream(reply: FastifyReply, groupId: string): void {
 
   send('ready', { groupId });
 
-  const unsubscribe = locationBus.subscribe(groupId, (event) => {
+  const unsubscribe = locationBus.subscribe(groupId, apiKeyId, (event) => {
     send(event.type, event.data);
   });
 
