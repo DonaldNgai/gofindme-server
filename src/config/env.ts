@@ -20,6 +20,9 @@ const envSchema = z.object({
   // Test Auth0 tokens (optional, only needed for tests)
   TEST_AUTH0_TOKEN_USER_1: z.string().optional(),
   TEST_AUTH0_TOKEN_USER_2: z.string().optional(),
+  // Optional: existing group ID for anonymous location submissions. If unset, one is created.
+  DEFAULT_ANONYMOUS_GROUP_ID: z.string().optional(),
+  APP_BASE_URL: z.string().url().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

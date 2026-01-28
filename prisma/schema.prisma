@@ -49,6 +49,7 @@ model groups {
   group_members     group_members[]
   location_shares   location_shares[]
   locations         locations[]
+  share_links       share_links[]
 
   @@map("groups")
 }
@@ -84,6 +85,7 @@ model users {
   group_invitations group_invitations[]
   group_members     group_members[]
   location_shares   location_shares[]
+  share_links       share_links[]
 
   @@map("users")
 }
@@ -128,4 +130,31 @@ model location_shares {
   @@index([is_active])
   @@index([started_at])
   @@index([user_id])
+}
+
+model anonymous_sessions {
+  id         String   @id @default(cuid())
+  token_hash String   @unique
+  expires_at DateTime
+  created_at DateTime @default(now())
+
+  @@index([token_hash])
+  @@index([expires_at])
+  @@map("anonymous_sessions")
+}
+
+model share_links {
+  id                 String    @id @default(cuid())
+  token_hash         String    @unique
+  group_id           String
+  created_by_user_id String?
+  expires_at         DateTime?
+  created_at         DateTime  @default(now())
+  groups             groups    @relation(fields: [group_id], references: [id], onDelete: Cascade)
+  users              users?    @relation(fields: [created_by_user_id], references: [id], onDelete: SetNull)
+
+  @@index([token_hash])
+  @@index([group_id])
+  @@index([expires_at])
+  @@map("share_links")
 }
