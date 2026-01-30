@@ -23,6 +23,8 @@ const envSchema = z.object({
   // Optional: existing group ID for anonymous location submissions. If unset, one is created.
   DEFAULT_ANONYMOUS_GROUP_ID: z.string().optional(),
   APP_BASE_URL: z.string().url().optional(),
+  // Shared secret for internal location submission from the frontend app. Required for POST /api/internal/locations.
+  FRONTEND_APP_SECRET: z.string().min(16).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

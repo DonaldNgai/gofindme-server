@@ -2,7 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import { registerInternalApiKeyRoutes } from './api-keys.js';
 import { registerInternalGroupRoutes } from './groups.js';
 import { registerGroupInvitationRoutes } from './group-invitations.js';
+import { registerInternalLocationRoutes } from './locations.js';
 import { registerLocationShareRoutes } from './location-shares.js';
+import { registerInternalShareLinkRoutes } from './share-links.js';
 import { registerUserRoutes } from './users.js';
 
 /**
@@ -25,6 +27,12 @@ export async function registerInternalRoutes(app: FastifyInstance): Promise<void
 
   // Register location share routes
   await registerLocationShareRoutes(app);
+
+  // Register internal location submission (app secret + share token)
+  await registerInternalLocationRoutes(app);
+
+  // Register share link routes
+  await registerInternalShareLinkRoutes(app);
 
   // Register user routes
   await registerUserRoutes(app);

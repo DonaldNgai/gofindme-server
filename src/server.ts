@@ -1,10 +1,7 @@
+import './utils/env.js'; // Load .env first (side effect)
 import Fastify from 'fastify';
-import { loadEnv } from './utils/env.js';
 import { buildApp } from './app.js';
 import { env } from './config/env.js';
-
-// Load environment variables before anything else
-loadEnv();
 
 async function start() {
   const fastify = Fastify({
