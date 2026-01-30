@@ -35,7 +35,7 @@ export async function resolveLocationAuth(
         : undefined;
 
   if (raw) {
-    const auth = await resolveOurToken(raw, reply);
+    const auth = await resolveOurToken(raw);
     if (auth) return auth;
     reply.code(401);
     reply.send({ error: 'Invalid or expired location token' });
@@ -68,7 +68,7 @@ export async function resolveLocationAuth(
     }
   }
 
-  const ourAuth = await resolveOurToken(bearer, reply);
+  const ourAuth = await resolveOurToken(bearer);
   if (ourAuth) return ourAuth;
 
   reply.code(401);
@@ -76,10 +76,7 @@ export async function resolveLocationAuth(
   throw new Error('Invalid token');
 }
 
-async function resolveOurToken(
-  token: string,
-  reply: FastifyReply
-): Promise<LocationAuth | null> {
+async function resolveOurToken(token: string): Promise<LocationAuth | null> {
   const isShare = token.startsWith('share_');
 
   if (isShare) {
